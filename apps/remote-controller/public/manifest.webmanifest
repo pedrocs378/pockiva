@@ -1,0 +1,9 @@
+{
+  "name": "Game Boy Controller",
+  "short_name": "GB Controller",
+  "description": "Local-network controller shell for the Game Boy desktop emulator",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#18181b"
+}
