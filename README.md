@@ -25,3 +25,14 @@ cargo test --workspace --all-features
 Use `pnpm dev:desktop` for the Tauri application and `pnpm dev:remote` for the browser controller after installing platform prerequisites.
 
 No ROM files are bundled. Do not add commercial ROMs to this repository.
+
+## Foundation documentation
+
+- [Workspace architecture](docs/architecture/workspace.md)
+- [Core contracts](docs/architecture/core-contracts.md)
+- [Controller protocol v1](docs/architecture/protocol-v1.md)
+- [Runtime boundaries](docs/architecture/runtime-boundaries.md)
+- [Testing strategy](docs/testing/strategy.md)
+- [ROM asset policy](docs/testing/rom-assets.md)
+
+The current foundation compiles shells and freezes contracts; it does not yet implement emulation, live ROM lifecycle, or a listening controller server.
