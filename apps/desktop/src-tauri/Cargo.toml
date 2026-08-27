@@ -1,0 +1,25 @@
+[package]
+name = "gameboy-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[lib]
+name = "gameboy_desktop"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+gb-core = { path = "../../../crates/gb-core" }
+gb-network = { path = "../../../crates/gb-network" }
+serde = { version = "1.0.229", features = ["derive"] }
+tauri = "2.11.5"
+
+[dev-dependencies]
+serde_json = "1.0"
+
+[build-dependencies]
+tauri-build = "2.6.3"
