@@ -1,0 +1,25 @@
+{
+  "validClientMessages": [
+    { "type": "hello", "version": "v1", "token": "pairing-token" },
+    { "type": "button-down", "button": "a", "sequence": 1 },
+    { "type": "button-up", "button": "start", "sequence": 2 },
+    { "type": "state-sync", "buttons": ["up", "left", "b"], "sequence": 3 },
+    { "type": "ping", "sequence": 4 }
+  ],
+  "validServerMessages": [
+    { "type": "welcome", "version": "v1", "controllerId": "controller-1" },
+    { "type": "rejected", "reason": "invalid-token" },
+    { "type": "pong", "sequence": 4 },
+    { "type": "controller-disconnected" }
+  ],
+  "invalidMessages": [
+    { "type": "hello", "version": "v2", "token": "pairing-token" },
+    { "type": "hello", "version": "v1", "token": "" },
+    { "type": "button-down", "button": "turbo", "sequence": 5 },
+    { "type": "button-up", "button": "a", "sequence": -1 },
+    { "type": "state-sync", "buttons": ["a", "a"], "sequence": 6 },
+    { "type": "rejected", "reason": "unknown" },
+    { "type": "welcome", "version": "v2", "controllerId": "controller-1" },
+    { "type": "pong", "sequence": 1, "token": "not-allowed" }
+  ]
+}
