@@ -18,6 +18,7 @@
     { "type": "button-down", "button": "turbo", "sequence": 5 },
     { "type": "button-up", "button": "a", "sequence": -1 },
     { "type": "state-sync", "buttons": ["a", "a"], "sequence": 6 },
+    { "type": "ping", "sequence": 9007199254740992 },
     { "type": "rejected", "reason": "unknown" },
     { "type": "welcome", "version": "v2", "controllerId": "controller-1" },
     { "type": "pong", "sequence": 1, "token": "not-allowed" }

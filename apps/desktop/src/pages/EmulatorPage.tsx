@@ -1,5 +1,7 @@
 import { PROTOCOL_VERSION } from '@gameboy/protocol'
 import { IconDeviceMobile, IconFolderOpen } from '@tabler/icons-react'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 
 export const EmulatorPage = () => (
   <main className="desktop-shell">
@@ -9,7 +11,9 @@ export const EmulatorPage = () => (
           <p className="eyebrow">Desktop emulator</p>
           <h1 id="emulator-title">Game Boy</h1>
         </div>
-        <span className="status-badge">No ROM loaded</span>
+        <Badge variant="secondary" className="status-badge">
+          No ROM loaded
+        </Badge>
       </header>
 
       <div className="viewport" role="img" aria-label="Game display">
@@ -17,10 +21,10 @@ export const EmulatorPage = () => (
       </div>
 
       <div className="foundation-actions">
-        <button type="button" className="primary-button" disabled>
+        <Button type="button" variant="unstyled" size="auto" className="primary-button" disabled>
           <IconFolderOpen aria-hidden="true" size={18} />
           Open ROM
-        </button>
+        </Button>
 
         <div className="remote-status">
           <IconDeviceMobile aria-hidden="true" size={20} />

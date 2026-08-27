@@ -15,7 +15,7 @@ importers:
   apps/desktop:
     dependencies:
       '@gameboy/protocol':
-        specifier: workspace:*
+        specifier: workspace:0.1.0
         version: link:../../packages/protocol
       '@tabler/icons-react':
         specifier: 3.46.0
@@ -109,7 +109,7 @@ importers:
   apps/remote-controller:
     dependencies:
       '@gameboy/protocol':
-        specifier: workspace:*
+        specifier: workspace:0.1.0
         version: link:../../packages/protocol
       '@tabler/icons-react':
         specifier: 3.46.0

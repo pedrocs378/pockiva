@@ -1,11 +1,12 @@
 import { z } from 'zod'
 
 export const PROTOCOL_VERSION = 'v1' as const
+export const MAX_SAFE_SEQUENCE = Number.MAX_SAFE_INTEGER
 
 export const buttonSchema = z.enum(['up', 'down', 'left', 'right', 'a', 'b', 'start', 'select'])
 export type Button = z.infer<typeof buttonSchema>
 
-const sequenceSchema = z.int().nonnegative()
+const sequenceSchema = z.int().nonnegative().max(MAX_SAFE_SEQUENCE)
 
 const helloSchema = z
   .object({

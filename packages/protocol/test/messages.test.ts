@@ -31,6 +31,13 @@ describe('protocol v1 client messages', () => {
     expect(() => parseClientMessage({ type: 'button-down', button: 'turbo', sequence: 3 })).toThrow()
     expect(() => parseClientMessage({ type: 'hello', version: 'v2', token: 'abc' })).toThrow()
   })
+
+  it('accepts only JavaScript-safe integer sequences', () => {
+    expect(parseClientMessage({ type: 'ping', sequence: Number.MAX_SAFE_INTEGER })).toMatchObject({
+      sequence: Number.MAX_SAFE_INTEGER
+    })
+    expect(() => parseClientMessage({ type: 'ping', sequence: Number.MAX_SAFE_INTEGER + 1 })).toThrow()
+  })
 })
 
 describe('canonical protocol fixtures', () => {
@@ -62,5 +69,12 @@ describe('protocol v1 server messages', () => {
     })
     expect(parseServerMessage({ type: 'pong', sequence: 4 })).toMatchObject({ sequence: 4 })
     expect(parseServerMessage({ type: 'controller-disconnected' })).toEqual({ type: 'controller-disconnected' })
+  })
+
+  it('accepts only JavaScript-safe integer sequences', () => {
+    expect(parseServerMessage({ type: 'pong', sequence: Number.MAX_SAFE_INTEGER })).toMatchObject({
+      sequence: Number.MAX_SAFE_INTEGER
+    })
+    expect(() => parseServerMessage({ type: 'pong', sequence: Number.MAX_SAFE_INTEGER + 1 })).toThrow()
   })
 })

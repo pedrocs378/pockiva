@@ -1,5 +1,7 @@
 import { PROTOCOL_VERSION } from '@gameboy/protocol'
 import { IconWifiOff } from '@tabler/icons-react'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 
 const dPadButtons = ['Up', 'Left', 'Right', 'Down'] as const
 const actionButtons = ['B', 'A'] as const
@@ -12,36 +14,50 @@ export const ControllerPage = () => (
         <p>Remote input</p>
         <h1>Game Boy Controller</h1>
       </div>
-      <div className="connection-state" role="status">
+      <Badge variant="outline" className="connection-state" role="status">
         <IconWifiOff aria-hidden="true" size={18} />
         Disconnected
-      </div>
+      </Badge>
     </header>
 
     <section className="controls" aria-label="Game Boy controls">
       <fieldset className="d-pad">
         <legend className="sr-only">Directional controls</legend>
         {dPadButtons.map((label) => (
-          <button key={label} type="button" className={`control-button direction ${label.toLowerCase()}`} disabled>
+          <Button
+            key={label}
+            type="button"
+            variant="unstyled"
+            size="auto"
+            className={`control-button direction ${label.toLowerCase()}`}
+            disabled
+          >
             {label}
-          </button>
+          </Button>
         ))}
       </fieldset>
 
       <div className="menu-controls">
         {menuButtons.map((label) => (
-          <button key={label} type="button" className="control-button menu" disabled>
+          <Button key={label} type="button" variant="unstyled" size="auto" className="control-button menu" disabled>
             {label}
-          </button>
+          </Button>
         ))}
       </div>
 
       <fieldset className="action-controls">
         <legend className="sr-only">Action controls</legend>
         {actionButtons.map((label) => (
-          <button key={label} type="button" className={`control-button action action-${label.toLowerCase()}`} disabled>
+          <Button
+            key={label}
+            type="button"
+            variant="unstyled"
+            size="auto"
+            className={`control-button action action-${label.toLowerCase()}`}
+            disabled
+          >
             {label}
-          </button>
+          </Button>
         ))}
       </fieldset>
     </section>

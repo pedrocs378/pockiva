@@ -4,6 +4,41 @@ use serde::de::Error as DeserializeError;
 use serde::{Deserialize, Deserializer, Serialize};
 
 pub const PROTOCOL_VERSION: &str = "v1";
+pub const MAX_SAFE_SEQUENCE: u64 = 9_007_199_254_740_991;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(transparent)]
+pub struct Sequence(u64);
+
+impl Sequence {
+    #[must_use]
+    pub const fn new(value: u64) -> Option<Self> {
+        if value <= MAX_SAFE_SEQUENCE {
+            Some(Self(value))
+        } else {
+            None
+        }
+    }
+
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for Sequence {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = u64::deserialize(deserializer)?;
+        Self::new(value).ok_or_else(|| {
+            D::Error::custom(format_args!(
+                "sequence must be at most JavaScript Number.MAX_SAFE_INTEGER ({MAX_SAFE_SEQUENCE})"
+            ))
+        })
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProtocolVersion {
@@ -39,19 +74,19 @@ pub enum ClientMessage {
     },
     ButtonDown {
         button: Button,
-        sequence: u64,
+        sequence: Sequence,
     },
     ButtonUp {
         button: Button,
-        sequence: u64,
+        sequence: Sequence,
     },
     StateSync {
         #[serde(deserialize_with = "deserialize_unique_buttons")]
         buttons: Vec<Button>,
-        sequence: u64,
+        sequence: Sequence,
     },
     Ping {
-        sequence: u64,
+        sequence: Sequence,
     },
 }
 
@@ -81,7 +116,7 @@ pub enum ServerMessage {
         reason: RejectionReason,
     },
     Pong {
-        sequence: u64,
+        sequence: Sequence,
     },
     ControllerDisconnected,
 }

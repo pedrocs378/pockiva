@@ -1,3 +1,5 @@
+use std::num::NonZeroU32;
+
 use gb_core::{
     AudioBatch, BatteryState, Button, CartridgeMetadata, Clock, CoreError, EmulatorCore, Frame,
     InputSourceId, JoypadState, RunOutcome, SCREEN_HEIGHT, SCREEN_WIDTH,
@@ -48,7 +50,7 @@ impl EmulatorCore for FakeCore {
     }
 
     fn drain_audio(&mut self) -> AudioBatch {
-        AudioBatch::empty(48_000)
+        AudioBatch::empty(NonZeroU32::new(48_000).expect("sample rate is non-zero"))
     }
 
     fn battery_state(&self) -> Option<BatteryState> {
@@ -82,4 +84,12 @@ fn clock_and_emulator_contracts_are_implementable() {
     let mut core = FakeCore::default();
     let outcome = core.run_cycles(456).expect("fake core can run");
     assert_eq!(outcome.cycles_executed(), 456);
+}
+
+#[test]
+fn audio_batch_exposes_a_non_zero_sample_rate() {
+    let sample_rate = NonZeroU32::new(48_000).expect("sample rate is non-zero");
+    let batch = AudioBatch::empty(sample_rate);
+
+    assert_eq!(batch.sample_rate(), sample_rate);
 }

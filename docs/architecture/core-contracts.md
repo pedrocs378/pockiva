@@ -23,7 +23,7 @@ The future runtime serializes load, reset, run, input, and close-related operati
 ## Data contracts
 
 - `Frame` owns an immutable RGBA buffer of exactly `SCREEN_WIDTH * SCREEN_HEIGHT * 4` bytes. `SCREEN_WIDTH` is `160`, `SCREEN_HEIGHT` is `144`, and `sequence` is monotonic for produced frames.
-- `AudioBatch` owns interleaved `f32` stereo pairs and a non-zero sample rate. The runtime drains batches into a bounded platform queue; the core boundary must never imply an unbounded consumer backlog.
+- `AudioBatch` owns interleaved `f32` stereo pairs and a `NonZeroU32` sample rate, so a zero-rate batch cannot be represented. The runtime drains batches into a bounded platform queue; the core boundary must never imply an unbounded consumer backlog.
 - `Button` contains only Up, Down, Left, Right, A, B, Start, and Select. `JoypadState` uses one internal bit per button and can form a union without representing invalid buttons.
 - `InputSourceId` is an opaque `u64` newtype. The runtime maintains a `JoypadState` per source and unions them. Clearing a disconnected source must preserve every other source.
 - `BatteryState` carries a format version, RAM bytes, and mapper-private bytes. It contains data only; atomic files, application directories, checkpoints, and corrupt-save preservation belong to the platform runtime.
