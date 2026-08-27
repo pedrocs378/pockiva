@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   "files": {
-    "includes": ["**", "!target", "!**/dist", "!**/coverage"]
+    "includes": ["**", "!target", "!**/dist", "!**/coverage", "!apps/desktop/src-tauri/gen"]
   },
   "formatter": {
     "enabled": true,

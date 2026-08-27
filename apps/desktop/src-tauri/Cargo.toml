@@ -16,10 +16,10 @@ workspace = true
 gb-core = { path = "../../../crates/gb-core" }
 gb-network = { path = "../../../crates/gb-network" }
 serde = { version = "1.0.229", features = ["derive"] }
-tauri = "2.11.5"
+tauri = { version = "2.11.5", features = [] }
 
 [dev-dependencies]
 serde_json = "1.0"
 
 [build-dependencies]
-tauri-build = "2.6.3"
+tauri-build = { version = "2.6.3", features = [] }

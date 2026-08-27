@@ -36,3 +36,7 @@ No ROM files are bundled. Do not add commercial ROMs to this repository.
 - [ROM asset policy](docs/testing/rom-assets.md)
 
 The current foundation compiles shells and freezes contracts; it does not yet implement emulation, live ROM lifecycle, or a listening controller server.
+
+## Continuous integration
+
+CI runs the complete quality/test suite on Ubuntu and compiles the desktop frontend and Tauri crate on native macOS Apple Silicon and Windows x64 runners. Installer signing, notarization, and release packaging are outside PED-34; these jobs provide compilation evidence only.

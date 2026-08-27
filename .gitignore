@@ -1,7 +1,9 @@
 node_modules/
+.pnpm-store/
 target/
 dist/
 coverage/
+*.tsbuildinfo
 .DS_Store
 *.app
 *.dmg

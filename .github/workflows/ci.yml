@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PNPM_VERSION: 11.24.0
+  NODE_VERSION: 24.20.0
+
+jobs:
+  quality:
+    name: Quality and tests
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install Linux Tauri prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            wget
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint and typecheck TypeScript
+        run: |
+          pnpm lint
+          pnpm typecheck
+
+      - name: Test and build TypeScript
+        run: |
+          pnpm test
+          pnpm build
+
+      - name: Check Rust formatting and lint
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test Rust workspace
+        run: cargo test --workspace --all-features
+
+      - name: Prove isolated core build
+        run: cargo check -p gb-core --no-default-features
+
+  desktop-macos:
+    name: Desktop compile (macOS Apple Silicon)
+    runs-on: macos-14
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies and build frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @gameboy/desktop build
+
+      - name: Check Tauri crate
+        run: cargo check -p gameboy-desktop
+
+  desktop-windows:
+    name: Desktop compile (Windows x64)
+    runs-on: windows-2025
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install Rust stable MSVC
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install dependencies and build frontend
+        shell: pwsh
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @gameboy/desktop build
+
+      - name: Check Tauri crate
+        run: cargo check -p gameboy-desktop --target x86_64-pc-windows-msvc
