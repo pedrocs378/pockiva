@@ -1,19 +1,10 @@
 import { useEffect, useState } from 'react'
-import { PROTOCOL_VERSION } from '@gameboy/protocol'
-import {
-  IconDeviceMobile,
-  IconFolderOpen,
-  IconPlayerPause,
-  IconPlayerPlay,
-  IconRefresh,
-  IconX
-} from '@tabler/icons-react'
+import { IconFolderOpen, IconPlayerPause, IconPlayerPlay, IconRefresh, IconX } from '@tabler/icons-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { GameViewport } from '@/features/emulator/GameViewport'
 import { type EmulatorRuntimeClient, tauriEmulatorRuntimeClient } from '@/features/emulator/runtime-client'
 import type { RuntimeErrorCode, RuntimePhase } from '@/features/emulator/runtime-types'
@@ -25,6 +16,8 @@ import {
   tauriKeyboardMappingRepository
 } from '@/features/keyboard/keyboard-mapping-store'
 import { useKeyboardInput } from '@/features/keyboard/use-keyboard-input'
+import { RemoteControllerPanel } from '@/features/remote-controller/RemoteControllerPanel'
+import type { RemoteSessionClient } from '@/features/remote-controller/remote-client'
 
 const errorHeadings: Record<RuntimeErrorCode, string> = {
   'file-inaccessible': 'The ROM file could not be read',
@@ -47,11 +40,13 @@ const phaseLabels: Record<RuntimePhase, string> = {
 type EmulatorPageProps = {
   runtimeClient?: EmulatorRuntimeClient
   keyboardMappingRepository?: KeyboardMappingRepository
+  remoteSessionClient?: RemoteSessionClient
 }
 
 export const EmulatorPage = ({
   runtimeClient = tauriEmulatorRuntimeClient,
-  keyboardMappingRepository = tauriKeyboardMappingRepository
+  keyboardMappingRepository = tauriKeyboardMappingRepository,
+  remoteSessionClient
 }: EmulatorPageProps) => {
   const runtime = useEmulatorRuntime(runtimeClient)
   const [mapping, setMapping] = useState<KeyboardMapping>(defaultKeyboardMapping)
@@ -166,20 +161,7 @@ export const EmulatorPage = ({
         <Separator />
 
         <CardFooter className="remote-footer">
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button aria-disabled="true" className="remote-status" type="button">
-                  <IconDeviceMobile aria-hidden="true" size={20} />
-                  <div>
-                    <strong>Mobile controller is off</strong>
-                    <span>Remote protocol {PROTOCOL_VERSION}</span>
-                  </div>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>PED-39 enables remote sessions.</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <RemoteControllerPanel client={remoteSessionClient} />
         </CardFooter>
       </Card>
 

@@ -53,8 +53,7 @@ select {
 }
 
 .app-header,
-.foundation-actions,
-.remote-status {
+.foundation-actions {
   display: flex;
   align-items: center;
 }
@@ -168,7 +167,93 @@ h1 {
 }
 
 .remote-footer {
+  display: block;
+}
+
+.remote-controller-panel {
+  width: 100%;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--border) 78%, transparent);
+  background: color-mix(in srgb, var(--muted) 45%, transparent);
+  box-shadow: none;
+}
+
+.remote-controller-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.remote-controller-content,
+.remote-controller-summary,
+.remote-pairing-details {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.remote-controller-summary {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  color: var(--muted-foreground);
+}
+
+.remote-controller-summary p,
+.remote-pairing-details p,
+.remote-latency {
+  margin: 0;
+}
+
+.remote-controller-summary strong {
+  color: var(--foreground);
+}
+
+.remote-pairing {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: center;
+}
+
+.remote-qr {
+  display: grid;
+  padding: 0.5rem;
+  place-items: center;
+  border-radius: 0.75rem;
+  background: #fff;
+}
+
+.remote-qr svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.remote-pairing-details {
+  min-width: 0;
+  color: var(--muted-foreground);
+}
+
+.remote-pairing-url {
+  width: 100%;
+  min-width: 0;
+  padding: 0.65rem 0.75rem;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  color: var(--foreground);
+  background: var(--background);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.75rem;
+}
+
+.remote-controller-actions {
   justify-content: flex-end;
+}
+
+.remote-latency {
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
 }
 
 .foundation-actions {
@@ -193,21 +278,6 @@ h1 {
   opacity: 0.55;
 }
 
-.remote-status {
-  gap: 0.65rem;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-}
-
-.remote-status div {
-  display: grid;
-  gap: 0.15rem;
-}
-
 @media (max-width: 36rem) {
   .desktop-shell {
     padding: 1rem;
@@ -216,6 +286,24 @@ h1 {
   .app-header,
   .foundation-actions {
     align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .remote-controller-header,
+  .remote-pairing {
+    grid-template-columns: 1fr;
+  }
+
+  .remote-controller-header {
+    flex-direction: column;
+  }
+
+  .remote-qr {
+    justify-self: center;
+  }
+
+  .remote-controller-actions {
+    align-items: stretch;
     flex-direction: column;
   }
 }

@@ -5,6 +5,8 @@ import type { EmulatorRuntimeClient, RuntimeSubscription } from '@/features/emul
 import type { RuntimeErrorCode, RuntimeSnapshot } from '@/features/emulator/runtime-types'
 import { defaultKeyboardMapping } from '@/features/keyboard/keyboard-mapping'
 import { KeyboardMappingRepository } from '@/features/keyboard/keyboard-mapping-store'
+import type { RemoteSessionClient } from '@/features/remote-controller/remote-client'
+import type { RemoteSnapshot } from '@/features/remote-controller/remote-types'
 import { EmulatorPage } from './EmulatorPage'
 
 const emptySnapshot: RuntimeSnapshot = { phase: 'empty', rom: null, error: null }
@@ -20,6 +22,14 @@ const pausedSnapshot: RuntimeSnapshot = {
   error: null
 }
 const runningSnapshot: RuntimeSnapshot = { ...pausedSnapshot, phase: 'running' }
+const remoteOffSnapshot: RemoteSnapshot = {
+  phase: 'off',
+  pairingUrl: null,
+  expiresAtUnixMs: null,
+  controllerId: null,
+  latency: null,
+  error: null
+}
 
 const deferred = <T,>() => {
   let resolve!: (value: T) => void
@@ -49,10 +59,25 @@ const createRepository = (value = defaultKeyboardMapping) =>
     save: vi.fn().mockResolvedValue(undefined)
   })
 
+const createRemoteClient = (): RemoteSessionClient => ({
+  subscribe: vi.fn().mockResolvedValue(remoteOffSnapshot),
+  snapshot: vi.fn().mockResolvedValue(remoteOffSnapshot),
+  start: vi.fn().mockResolvedValue(remoteOffSnapshot),
+  end: vi.fn().mockResolvedValue(remoteOffSnapshot)
+})
+
 const renderPage = (
   runtimeClient: EmulatorRuntimeClient = createClient(),
-  keyboardMappingRepository = createRepository()
-) => render(<EmulatorPage runtimeClient={runtimeClient} keyboardMappingRepository={keyboardMappingRepository} />)
+  keyboardMappingRepository = createRepository(),
+  remoteSessionClient = createRemoteClient()
+) =>
+  render(
+    <EmulatorPage
+      runtimeClient={runtimeClient}
+      keyboardMappingRepository={keyboardMappingRepository}
+      remoteSessionClient={remoteSessionClient}
+    />
+  )
 
 afterEach(() => cleanup())
 
@@ -68,7 +93,22 @@ describe('EmulatorPage lifecycle', () => {
     expect(screen.getByRole('button', { name: 'Restart' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Close ROM' })).toBeDisabled()
     expect(screen.getByText('Mobile controller is off')).toBeVisible()
-    expect(screen.getByText('Remote protocol v1')).toBeVisible()
+    expect(screen.getByText('Protocol v1')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Start mobile controller' })).toBeEnabled()
+  })
+
+  it('keeps the remote session client independent from ROM lifecycle actions', async () => {
+    const user = userEvent.setup()
+    const runtimeClient = createClient()
+    const remoteSessionClient = createRemoteClient()
+    renderPage(runtimeClient, createRepository(), remoteSessionClient)
+
+    await screen.findByText('Mobile controller is off')
+    await user.click(screen.getByRole('button', { name: 'Start mobile controller' }))
+
+    expect(remoteSessionClient.start).toHaveBeenCalledOnce()
+    expect(runtimeClient.openRom).not.toHaveBeenCalled()
+    expect(runtimeClient.start).not.toHaveBeenCalled()
   })
 
   it('opens, starts, and closes a ROM with explicit enablement', async () => {
