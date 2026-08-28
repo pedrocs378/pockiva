@@ -11,4 +11,8 @@ commands.allow = [
   "close_rom",
   "set_keyboard_input",
   "acknowledge_frame",
+  "remote_snapshot",
+  "subscribe_remote",
+  "start_remote_session",
+  "end_remote_session",
 ]

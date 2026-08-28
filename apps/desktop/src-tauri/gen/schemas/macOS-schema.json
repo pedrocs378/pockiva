@@ -195,6 +195,12 @@
           "markdownDescription": "Allows the main window to control the local emulator runtime."
         },
         {
+          "description": "Enables the end_remote_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-end-remote-session",
+          "markdownDescription": "Enables the end_remote_session command without any pre-configured scope."
+        },
+        {
           "description": "Enables the foundation_status command without any pre-configured scope.",
           "type": "string",
           "const": "allow-foundation-status",
@@ -211,6 +217,12 @@
           "type": "string",
           "const": "allow-pause-rom",
           "markdownDescription": "Enables the pause_rom command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the remote_snapshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-remote-snapshot",
+          "markdownDescription": "Enables the remote_snapshot command without any pre-configured scope."
         },
         {
           "description": "Enables the restart_rom command without any pre-configured scope.",
@@ -231,10 +243,22 @@
           "markdownDescription": "Enables the set_keyboard_input command without any pre-configured scope."
         },
         {
+          "description": "Enables the start_remote_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-start-remote-session",
+          "markdownDescription": "Enables the start_remote_session command without any pre-configured scope."
+        },
+        {
           "description": "Enables the start_rom command without any pre-configured scope.",
           "type": "string",
           "const": "allow-start-rom",
           "markdownDescription": "Enables the start_rom command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the subscribe_remote command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-subscribe-remote",
+          "markdownDescription": "Enables the subscribe_remote command without any pre-configured scope."
         },
         {
           "description": "Enables the subscribe_runtime command without any pre-configured scope.",
@@ -255,6 +279,12 @@
           "markdownDescription": "Denies the close_rom command without any pre-configured scope."
         },
         {
+          "description": "Denies the end_remote_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-end-remote-session",
+          "markdownDescription": "Denies the end_remote_session command without any pre-configured scope."
+        },
+        {
           "description": "Denies the foundation_status command without any pre-configured scope.",
           "type": "string",
           "const": "deny-foundation-status",
@@ -271,6 +301,12 @@
           "type": "string",
           "const": "deny-pause-rom",
           "markdownDescription": "Denies the pause_rom command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the remote_snapshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-remote-snapshot",
+          "markdownDescription": "Denies the remote_snapshot command without any pre-configured scope."
         },
         {
           "description": "Denies the restart_rom command without any pre-configured scope.",
@@ -291,10 +327,22 @@
           "markdownDescription": "Denies the set_keyboard_input command without any pre-configured scope."
         },
         {
+          "description": "Denies the start_remote_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-start-remote-session",
+          "markdownDescription": "Denies the start_remote_session command without any pre-configured scope."
+        },
+        {
           "description": "Denies the start_rom command without any pre-configured scope.",
           "type": "string",
           "const": "deny-start-rom",
           "markdownDescription": "Denies the start_rom command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the subscribe_remote command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-subscribe-remote",
+          "markdownDescription": "Denies the subscribe_remote command without any pre-configured scope."
         },
         {
           "description": "Denies the subscribe_runtime command without any pre-configured scope.",

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-end-remote-session"
+description = "Enables the end_remote_session command without any pre-configured scope."
+commands.allow = ["end_remote_session"]
+
+[[permission]]
+identifier = "deny-end-remote-session"
+description = "Denies the end_remote_session command without any pre-configured scope."
+commands.deny = ["end_remote_session"]

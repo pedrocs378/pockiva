@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-remote-snapshot"
+description = "Enables the remote_snapshot command without any pre-configured scope."
+commands.allow = ["remote_snapshot"]
+
+[[permission]]
+identifier = "deny-remote-snapshot"
+description = "Denies the remote_snapshot command without any pre-configured scope."
+commands.deny = ["remote_snapshot"]
