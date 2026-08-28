@@ -30,8 +30,18 @@ describe('mobile controller shell', () => {
     expect(styles).toContain('env(safe-area-inset-bottom)')
   })
 
-  it('reserves landscape space for the rotated action controls', () => {
-    expect(styles).toContain('margin-inline: 0.75rem')
-    expect(styles).toContain('width: clamp(3rem, 15dvh, 4rem)')
+  it('enlarges landscape gameplay controls and keeps short screens safe', () => {
+    expect(styles).toContain('@media (orientation: landscape) and (max-height: 32rem)')
+    expect(styles).toContain('width: min(42dvh, 13rem)')
+    expect(styles).toContain('width: clamp(4rem, 20dvh, 5.5rem)')
+    expect(styles).toContain('env(safe-area-inset-left)')
+    expect(styles).toContain('env(safe-area-inset-right)')
+    expect(styles).toContain('.controller-title')
+  })
+
+  it('styles a fixed bounded joystick with touch gestures disabled', () => {
+    expect(styles).toContain('.virtual-joystick')
+    expect(styles).toContain('.joystick-knob')
+    expect(styles).toMatch(/\.virtual-joystick\s*\{[\s\S]*?touch-action:\s*none;/)
   })
 })
