@@ -1,7 +1,9 @@
 # PED-39 Remote Integration Evidence
 
-**Date:** 2026-08-28  
-**Implementation revision:** `a98919d`  
+**Date:** 2026-08-28
+
+**Implementation revision:** `a98919d`
+
 **Status:** automated gates and macOS Apple Silicon build/smoke passed; native Windows and real phone/ROM acceptance remain pending.
 
 No pairing token, complete pairing URL, ROM bytes, or arbitrary filesystem path is recorded here.
