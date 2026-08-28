@@ -1,8 +1,9 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EmulatorRuntimeClient, RuntimeSubscription } from './runtime-client'
-import type { FramePacket, RuntimeSnapshot } from './runtime-types'
+import type { RuntimeSnapshot } from './runtime-types'
 import { useEmulatorRuntime } from './use-emulator-runtime'
+import type { FramePacket } from './video'
 
 const emptySnapshot: RuntimeSnapshot = { phase: 'empty', rom: null, error: null }
 const pausedSnapshot: RuntimeSnapshot = {

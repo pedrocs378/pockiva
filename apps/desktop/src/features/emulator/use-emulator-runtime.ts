@@ -1,12 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { type EmulatorRuntimeClient, tauriEmulatorRuntimeClient } from './runtime-client'
-import {
-  type FramePacket,
-  parseRuntimeError,
-  type RuntimeButton,
-  type RuntimeError,
-  type RuntimeSnapshot
-} from './runtime-types'
+import { parseRuntimeError, type RuntimeButton, type RuntimeError, type RuntimeSnapshot } from './runtime-types'
+import type { FramePacket } from './video'
 
 const emptySnapshot: RuntimeSnapshot = { phase: 'empty', rom: null, error: null }
 

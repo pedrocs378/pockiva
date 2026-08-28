@@ -1,7 +1,7 @@
-import { useEffect, useRef } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Skeleton } from '@/components/ui/skeleton'
-import type { FramePacket, RuntimeError, RuntimePhase } from './runtime-types'
+import type { RuntimeError, RuntimePhase } from './runtime-types'
+import { FrameCanvas, type FramePacket } from './video'
 
 type GameViewportProps = {
   phase: RuntimePhase
@@ -11,47 +11,9 @@ type GameViewportProps = {
 }
 
 export const GameViewport = ({ phase, error, subscribeFrames, acknowledgeFrame }: GameViewportProps) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const pendingFrameRef = useRef<FramePacket | null>(null)
-  const animationFrameRef = useRef<number | null>(null)
-
-  useEffect(() => {
-    const draw = () => {
-      animationFrameRef.current = null
-      const frame = pendingFrameRef.current
-      pendingFrameRef.current = null
-      const context = canvasRef.current?.getContext('2d')
-      if (!frame || !context) return
-
-      context.putImageData(new ImageData(frame.rgba, frame.width, frame.height), 0, 0)
-      void acknowledgeFrame(frame.sequence)
-    }
-
-    const unsubscribe = subscribeFrames((frame) => {
-      pendingFrameRef.current = frame
-      if (animationFrameRef.current === null) {
-        animationFrameRef.current = requestAnimationFrame(draw)
-      }
-    })
-
-    return () => {
-      unsubscribe()
-      pendingFrameRef.current = null
-      if (animationFrameRef.current !== null) cancelAnimationFrame(animationFrameRef.current)
-      animationFrameRef.current = null
-    }
-  }, [acknowledgeFrame, subscribeFrames])
-
   return (
     <div className="game-viewport-shell">
-      <canvas
-        ref={canvasRef}
-        aria-label="Game display"
-        className="game-viewport-canvas"
-        height={144}
-        role="img"
-        width={160}
-      />
+      <FrameCanvas subscribeFrames={subscribeFrames} acknowledgeFrame={acknowledgeFrame} />
 
       {phase === 'empty' && (
         <div className="game-viewport-overlay">

@@ -28,7 +28,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: tauriMocks.open }))
 
 import { tauriEmulatorRuntimeClient as client } from './runtime-client'
-import { FRAME_PACKET_BYTE_LENGTH } from './runtime-types'
+import { FRAME_PACKET_BYTE_LENGTH } from './video'
 
 const pausedSnapshot = {
   phase: 'paused',

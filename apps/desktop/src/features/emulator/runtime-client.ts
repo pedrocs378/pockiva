@@ -1,8 +1,6 @@
 import { Channel, invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import {
-  decodeFramePacket,
-  type FramePacket,
   parseRuntimeError,
   parseRuntimeEvent,
   parseRuntimeSnapshot,
@@ -10,6 +8,7 @@ import {
   type RuntimeError,
   type RuntimeSnapshot
 } from './runtime-types'
+import { decodeFramePacket, type FramePacket } from './video'
 
 export type RuntimeSubscription = {
   onSnapshot: (snapshot: RuntimeSnapshot) => void

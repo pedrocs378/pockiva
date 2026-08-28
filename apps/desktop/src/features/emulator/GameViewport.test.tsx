@@ -1,7 +1,8 @@
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { GameViewport } from './GameViewport'
-import type { FramePacket, RuntimeError, RuntimePhase } from './runtime-types'
+import type { RuntimeError, RuntimePhase } from './runtime-types'
+import type { FramePacket } from './video'
 
 const subscribeFrames = vi.fn()
 const acknowledgeFrame = vi.fn().mockResolvedValue(undefined)
