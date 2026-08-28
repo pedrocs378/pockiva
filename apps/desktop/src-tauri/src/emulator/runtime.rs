@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::fs;
 use std::num::NonZeroU32;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -9,6 +11,7 @@ use std::time::{Duration, Instant};
 use gb_core::{
     AudioBatch, Button, CartridgeMetadata, EmulatorCore, Frame, InputSourceId, JoypadState,
 };
+use gb_network::{Button as NetworkButton, ClientMessage, ControllerConnectionId, ControllerEvent};
 
 use super::contracts::{
     RomSummary, RuntimeButton, RuntimeError, RuntimeErrorCode, RuntimeEvent, RuntimePhase,
@@ -26,7 +29,89 @@ const FRAME_INTERVAL: Duration = Duration::from_micros(16_743);
 const FRAME_CYCLE_BUDGET: u32 = 70_224;
 const AUDIO_POLL_INTERVAL: Duration = Duration::from_millis(5);
 const MAX_PRIME_BATCHES: usize = 4;
+#[cfg_attr(not(test), allow(dead_code))]
+const CONTROLLER_QUEUE_RETRY_INTERVAL: Duration = Duration::from_millis(1);
+#[cfg_attr(not(test), allow(dead_code))]
+const CONTROLLER_QUEUE_RETRY_TIMEOUT: Duration = Duration::from_millis(100);
 const KEYBOARD_INPUT_SOURCE: InputSourceId = InputSourceId::new(1);
+const REMOTE_INPUT_SOURCE: InputSourceId = InputSourceId::new(2);
+
+struct CurrentController {
+    connection_id: ControllerConnectionId,
+    generation: u64,
+}
+
+struct RemoteInputSnapshot {
+    generation: u64,
+    state: JoypadState,
+}
+
+#[derive(Default)]
+struct ControllerGenerations {
+    // One controller is current at a time. Monotonic generations replace per-connection
+    // tombstones, so cancellation memory stays constant even while the worker is blocked.
+    current: Mutex<Option<CurrentController>>,
+    next_generation: AtomicU64,
+    cancelled_through: AtomicU64,
+}
+
+impl ControllerGenerations {
+    fn prepare(&self, event: &ControllerEvent) -> RuntimeResult<Option<u64>> {
+        match event {
+            ControllerEvent::Connected { connection_id, .. } => {
+                let previous = self
+                    .next_generation
+                    .fetch_update(Ordering::AcqRel, Ordering::Acquire, |generation| {
+                        generation.checked_add(1)
+                    })
+                    .map_err(|_| runtime_unavailable())?;
+                let generation = previous + 1;
+                *self
+                    .current
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(CurrentController {
+                    connection_id: connection_id.clone(),
+                    generation,
+                });
+                Ok(Some(generation))
+            }
+            ControllerEvent::Message { connection_id, .. } => {
+                let current = self
+                    .current
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                Ok(current
+                    .as_ref()
+                    .filter(|current| current.connection_id == *connection_id)
+                    .map(|current| current.generation))
+            }
+            ControllerEvent::Disconnected { connection_id, .. } => {
+                let mut current = self
+                    .current
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let Some(generation) = current
+                    .as_ref()
+                    .filter(|current| current.connection_id == *connection_id)
+                    .map(|current| current.generation)
+                else {
+                    return Ok(None);
+                };
+                self.cancelled_through
+                    .fetch_max(generation, Ordering::Release);
+                *current = None;
+                Ok(Some(generation))
+            }
+        }
+    }
+}
+
+#[derive(Default)]
+struct RemoteInputs {
+    snapshots: HashMap<InputSourceId, RemoteInputSnapshot>,
+    owner: Option<CurrentController>,
+    cleared_through: u64,
+}
 
 pub trait RuntimeCore: EmulatorCore + Send {}
 impl<T: EmulatorCore + Send> RuntimeCore for T {}
@@ -140,6 +225,12 @@ enum RuntimeCommand {
     },
     SetKeyboardInput {
         buttons: Vec<RuntimeButton>,
+        reply: SyncSender<RuntimeResult<()>>,
+    },
+    #[cfg_attr(not(test), allow(dead_code))]
+    ControllerEvent {
+        event: ControllerEvent,
+        generation: u64,
         reply: SyncSender<RuntimeResult<()>>,
     },
     Snapshot {
@@ -314,7 +405,47 @@ impl RuntimeAudio {
 
 pub struct DesktopRuntime {
     sender: SyncSender<RuntimeCommand>,
+    controller_generations: Arc<ControllerGenerations>,
     worker: Mutex<Option<JoinHandle<()>>>,
+}
+
+#[derive(Clone)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) struct DesktopRuntimeHandle {
+    sender: SyncSender<RuntimeCommand>,
+    controller_generations: Arc<ControllerGenerations>,
+}
+
+impl DesktopRuntimeHandle {
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn apply_controller_event(&self, event: ControllerEvent) -> RuntimeResult<()> {
+        validate_remote_event_source(&event)?;
+        let Some(generation) = self.controller_generations.prepare(&event)? else {
+            return Ok(());
+        };
+        let (reply, response) = mpsc::sync_channel(1);
+        let mut command = RuntimeCommand::ControllerEvent {
+            event,
+            generation,
+            reply,
+        };
+        let deadline = Instant::now() + CONTROLLER_QUEUE_RETRY_TIMEOUT;
+        loop {
+            match self.sender.try_send(command) {
+                Ok(()) => break,
+                Err(TrySendError::Full(returned)) if Instant::now() < deadline => {
+                    command = returned;
+                    thread::sleep(CONTROLLER_QUEUE_RETRY_INTERVAL);
+                }
+                Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {
+                    return Err(runtime_unavailable());
+                }
+            }
+        }
+        response
+            .recv_timeout(RESPONSE_TIMEOUT)
+            .map_err(|_| runtime_unavailable())?
+    }
 }
 
 #[cfg(test)]
@@ -331,6 +462,14 @@ impl AudioOutputFactory for UnavailableAudioFactory {
 }
 
 impl DesktopRuntime {
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn handle(&self) -> DesktopRuntimeHandle {
+        DesktopRuntimeHandle {
+            sender: self.sender.clone(),
+            controller_generations: Arc::clone(&self.controller_generations),
+        }
+    }
+
     #[cfg(test)]
     #[must_use]
     pub fn spawn(factory: Arc<dyn CoreFactory>) -> Self {
@@ -393,6 +532,8 @@ impl DesktopRuntime {
         prepared_error: Option<AudioBackendError>,
     ) -> Self {
         let (sender, receiver) = mpsc::sync_channel(COMMAND_QUEUE_CAPACITY);
+        let controller_generations = Arc::new(ControllerGenerations::default());
+        let worker_controller_generations = Arc::clone(&controller_generations);
         let worker = thread::Builder::new()
             .name("gameboy-desktop-runtime".into())
             .spawn(move || {
@@ -403,11 +544,13 @@ impl DesktopRuntime {
                     runtime_sample_rate,
                     prepared_output,
                     prepared_error,
+                    &worker_controller_generations,
                 );
             })
             .expect("desktop runtime worker starts");
         Self {
             sender,
+            controller_generations,
             worker: Mutex::new(Some(worker)),
         }
     }
@@ -461,7 +604,12 @@ impl DesktopRuntime {
 
     #[cfg(test)]
     fn test_only_fill_command_queue(&self) {
-        for _ in 0..COMMAND_QUEUE_CAPACITY {
+        self.test_only_fill_command_queue_slots(COMMAND_QUEUE_CAPACITY);
+    }
+
+    #[cfg(test)]
+    fn test_only_fill_command_queue_slots(&self, count: usize) {
+        for _ in 0..count {
             let (reply, _response) = mpsc::sync_channel(1);
             self.sender
                 .try_send(RuntimeCommand::Snapshot { reply })
@@ -516,11 +664,13 @@ fn run_worker(
     runtime_sample_rate: NonZeroU32,
     prepared_output: Option<Box<dyn AudioOutput>>,
     prepared_error: Option<AudioBackendError>,
+    controller_generations: &ControllerGenerations,
 ) {
     let mut model = RuntimeModel::default();
     let mut core: Option<Box<dyn RuntimeCore>> = None;
     let mut observer: Option<Arc<dyn RuntimeObserver>> = None;
     let mut delivery = FrameQueue::default();
+    let mut remote_inputs = RemoteInputs::default();
     let mut audio = RuntimeAudio::new(
         audio_factory,
         runtime_sample_rate,
@@ -530,6 +680,13 @@ fn run_worker(
     let mut next_frame_deadline: Option<Instant> = None;
 
     loop {
+        drain_cancelled_remote_input(
+            core.as_deref_mut(),
+            &mut remote_inputs,
+            controller_generations
+                .cancelled_through
+                .load(Ordering::Acquire),
+        );
         audio.disable_if_unusable();
         let now = Instant::now();
         let timeout = if model.snapshot.phase != RuntimePhase::Running {
@@ -562,6 +719,13 @@ fn run_worker(
         };
         match receiver.recv_timeout(timeout) {
             Ok(command) => {
+                drain_cancelled_remote_input(
+                    core.as_deref_mut(),
+                    &mut remote_inputs,
+                    controller_generations
+                        .cancelled_through
+                        .load(Ordering::Acquire),
+                );
                 if handle_command(
                     command,
                     factory,
@@ -570,6 +734,8 @@ fn run_worker(
                     &mut observer,
                     &mut delivery,
                     &mut audio,
+                    &mut remote_inputs,
+                    controller_generations,
                 ) {
                     break;
                 }
@@ -654,6 +820,7 @@ fn advance_frame_deadline(deadline: Instant, now: Instant) -> Instant {
 }
 
 #[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 fn handle_command(
     command: RuntimeCommand,
     factory: &Arc<dyn CoreFactory>,
@@ -662,6 +829,8 @@ fn handle_command(
     observer: &mut Option<Arc<dyn RuntimeObserver>>,
     delivery: &mut FrameQueue,
     audio: &mut RuntimeAudio,
+    remote_inputs: &mut RemoteInputs,
+    controller_generations: &ControllerGenerations,
 ) -> bool {
     match command {
         RuntimeCommand::Subscribe {
@@ -686,7 +855,7 @@ fn handle_command(
             delivery.clear();
             model.begin_load();
             let _ = publish_control(model, observer);
-            let result = load_rom(&path, factory, model, core, audio);
+            let result = load_rom(&path, factory, model, core, audio, remote_inputs);
             let _ = publish_control(model, observer);
             let _ = reply.send(result);
         }
@@ -709,7 +878,7 @@ fn handle_command(
         RuntimeCommand::Restart { reply } => {
             delivery.clear();
             audio.pause();
-            let result = restart_core(model, core);
+            let result = restart_core(model, core, remote_inputs);
             if result.is_ok() {
                 let _ = publish_control(model, observer);
             }
@@ -728,6 +897,22 @@ fn handle_command(
         }
         RuntimeCommand::SetKeyboardInput { buttons, reply } => {
             let result = set_keyboard_input(core.as_deref_mut(), buttons);
+            let _ = reply.send(result);
+        }
+        RuntimeCommand::ControllerEvent {
+            event,
+            generation,
+            reply,
+        } => {
+            let result = apply_controller_event(
+                core.as_deref_mut(),
+                remote_inputs,
+                event,
+                generation,
+                controller_generations
+                    .cancelled_through
+                    .load(Ordering::Acquire),
+            );
             let _ = reply.send(result);
         }
         RuntimeCommand::Snapshot { reply } => {
@@ -773,6 +958,7 @@ fn load_rom(
     model: &mut RuntimeModel,
     core: &mut Option<Box<dyn RuntimeCore>>,
     audio: &mut RuntimeAudio,
+    remote_inputs: &RemoteInputs,
 ) -> RuntimeResult<RuntimeSnapshot> {
     let bytes = fs::read(path).map_err(|_| {
         RuntimeError::new(
@@ -796,6 +982,7 @@ fn load_rom(
     // PED-40 owns persisted battery loading and every save/flush path.
     match candidate.load_rom(&bytes, None) {
         Ok(metadata) => {
+            apply_retained_remote_inputs(candidate.as_mut(), remote_inputs);
             model.finish_load(metadata, file_name);
             *core = Some(candidate);
             audio.activate(candidate_output);
@@ -815,11 +1002,13 @@ fn load_rom(
 fn restart_core(
     model: &mut RuntimeModel,
     core: &mut Option<Box<dyn RuntimeCore>>,
+    remote_inputs: &RemoteInputs,
 ) -> RuntimeResult<RuntimeSnapshot> {
     model.require_loaded()?;
     let active = core.as_deref_mut().ok_or_else(runtime_unavailable)?;
     active.clear_input_source(KEYBOARD_INPUT_SOURCE);
     active.reset().map_err(RuntimeError::from)?;
+    apply_retained_remote_inputs(active, remote_inputs);
     model.restart()?;
     Ok(model.snapshot())
 }
@@ -846,6 +1035,136 @@ fn set_keyboard_input(
     }
     active.set_input(KEYBOARD_INPUT_SOURCE, state);
     Ok(())
+}
+
+fn apply_controller_event(
+    core: Option<&mut (dyn RuntimeCore + '_)>,
+    remote_inputs: &mut RemoteInputs,
+    event: ControllerEvent,
+    generation: u64,
+    cancelled_through: u64,
+) -> RuntimeResult<()> {
+    validate_remote_event_source(&event)?;
+    if generation <= cancelled_through {
+        return Ok(());
+    }
+    match event {
+        ControllerEvent::Connected { connection_id, .. } => {
+            remote_inputs.owner = Some(CurrentController {
+                connection_id,
+                generation,
+            });
+            Ok(())
+        }
+        ControllerEvent::Disconnected { .. } => Ok(()),
+        ControllerEvent::Message {
+            connection_id,
+            input_source,
+            message,
+        } => {
+            let state = match message {
+                ClientMessage::StateSync { buttons, .. } => {
+                    let mut state = JoypadState::default();
+                    for button in buttons {
+                        state.press(map_network_button(button));
+                    }
+                    state
+                }
+                ClientMessage::ButtonDown { button, .. } => {
+                    let mut state = remote_inputs
+                        .snapshots
+                        .get(&input_source)
+                        .filter(|snapshot| snapshot.generation == generation)
+                        .map_or_else(JoypadState::default, |snapshot| snapshot.state);
+                    state.press(map_network_button(button));
+                    state
+                }
+                ClientMessage::ButtonUp { button, .. } => {
+                    let mut state = remote_inputs
+                        .snapshots
+                        .get(&input_source)
+                        .filter(|snapshot| snapshot.generation == generation)
+                        .map_or_else(JoypadState::default, |snapshot| snapshot.state);
+                    state.release(map_network_button(button));
+                    state
+                }
+                ClientMessage::Hello { .. } | ClientMessage::Ping { .. } => {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::InvalidLifecycle,
+                        "Controller handshake and heartbeat messages cannot reach emulator input.",
+                    ));
+                }
+            };
+            remote_inputs.owner = Some(CurrentController {
+                connection_id,
+                generation,
+            });
+            remote_inputs
+                .snapshots
+                .insert(input_source, RemoteInputSnapshot { generation, state });
+            if let Some(active) = core {
+                active.set_input(input_source, state);
+            }
+            Ok(())
+        }
+    }
+}
+
+fn validate_remote_event_source(event: &ControllerEvent) -> RuntimeResult<()> {
+    let input_source = match event {
+        ControllerEvent::Connected { input_source, .. }
+        | ControllerEvent::Disconnected { input_source, .. }
+        | ControllerEvent::Message { input_source, .. } => *input_source,
+    };
+    if input_source == REMOTE_INPUT_SOURCE {
+        Ok(())
+    } else {
+        Err(RuntimeError::new(
+            RuntimeErrorCode::InvalidLifecycle,
+            "Remote controller events must use the reserved remote input source.",
+        ))
+    }
+}
+
+fn drain_cancelled_remote_input(
+    core: Option<&mut (dyn RuntimeCore + '_)>,
+    remote_inputs: &mut RemoteInputs,
+    cancelled_through: u64,
+) {
+    if cancelled_through <= remote_inputs.cleared_through {
+        return;
+    }
+    remote_inputs.cleared_through = cancelled_through;
+    if remote_inputs
+        .owner
+        .as_ref()
+        .is_some_and(|owner| owner.generation <= cancelled_through)
+    {
+        remote_inputs.owner = None;
+        remote_inputs.snapshots.remove(&REMOTE_INPUT_SOURCE);
+    }
+    if let Some(active) = core {
+        active.clear_input_source(REMOTE_INPUT_SOURCE);
+    }
+}
+
+fn apply_retained_remote_inputs(core: &mut dyn RuntimeCore, remote_inputs: &RemoteInputs) {
+    for (&source, snapshot) in &remote_inputs.snapshots {
+        core.set_input(source, snapshot.state);
+    }
+}
+
+const fn map_network_button(button: NetworkButton) -> Button {
+    match button {
+        NetworkButton::Up => Button::Up,
+        NetworkButton::Down => Button::Down,
+        NetworkButton::Left => Button::Left,
+        NetworkButton::Right => Button::Right,
+        NetworkButton::A => Button::A,
+        NetworkButton::B => Button::B,
+        NetworkButton::Start => Button::Start,
+        NetworkButton::Select => Button::Select,
+    }
 }
 
 fn run_tick(
@@ -964,6 +1283,10 @@ mod tests {
         AudioBatch, BatteryState, Button, CartridgeMetadata, CompatibilityMode, CoreError,
         EmulatorCore, Frame, InputSourceId, JoypadState, MapperKind, RunOutcome,
     };
+    use gb_network::{
+        Button as NetworkButton, ClientMessage, ControllerConnectionId, ControllerEvent,
+        ProtocolVersion, Sequence,
+    };
 
     use super::{
         CoreFactory, DesktopRuntime, RuntimeAudio, RuntimeCore, RuntimeModel, RuntimeObserver,
@@ -978,6 +1301,660 @@ mod tests {
     use crate::emulator::mock_core::ContractMockCoreFactory;
 
     static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn remote_message(message: ClientMessage) -> ControllerEvent {
+        remote_message_from("controller-1", message)
+    }
+
+    fn remote_message_from(connection_id: &str, message: ClientMessage) -> ControllerEvent {
+        ControllerEvent::Message {
+            connection_id: ControllerConnectionId::new(connection_id).expect("connection id"),
+            input_source: InputSourceId::new(2),
+            message,
+        }
+    }
+
+    fn remote_connect() -> ControllerEvent {
+        remote_connect_from("controller-1")
+    }
+
+    fn remote_connect_from(connection_id: &str) -> ControllerEvent {
+        ControllerEvent::Connected {
+            connection_id: ControllerConnectionId::new(connection_id).expect("connection id"),
+            input_source: InputSourceId::new(2),
+        }
+    }
+
+    fn remote_state_sync(buttons: Vec<NetworkButton>, sequence: u64) -> ControllerEvent {
+        remote_message(ClientMessage::StateSync {
+            buttons,
+            sequence: Sequence::new(sequence).expect("safe sequence"),
+        })
+    }
+
+    fn remote_disconnect() -> ControllerEvent {
+        ControllerEvent::Disconnected {
+            connection_id: ControllerConnectionId::new("controller-1").expect("connection id"),
+            input_source: InputSourceId::new(2),
+        }
+    }
+
+    #[test]
+    fn remote_input_coexists_with_keyboard_and_disconnect_clears_only_remote() {
+        let path = synthetic_rom_path();
+        let factory = Arc::new(RecordingCoreFactory::default());
+        let state = Arc::clone(&factory.state);
+        let runtime = spawn_runtime(factory);
+        let handle = runtime.handle();
+        runtime.open_rom(path.clone()).expect("loads");
+        runtime.start().expect("starts");
+        runtime
+            .set_keyboard_input(vec![RuntimeButton::A])
+            .expect("keyboard A");
+        handle
+            .apply_controller_event(remote_connect())
+            .expect("remote connects");
+        handle
+            .apply_controller_event(remote_state_sync(
+                vec![NetworkButton::Left, NetworkButton::A],
+                1,
+            ))
+            .expect("remote state sync");
+        handle
+            .apply_controller_event(remote_message(ClientMessage::ButtonUp {
+                button: NetworkButton::A,
+                sequence: Sequence::new(2).expect("safe sequence"),
+            }))
+            .expect("remote A up");
+        handle
+            .apply_controller_event(remote_message(ClientMessage::ButtonDown {
+                button: NetworkButton::B,
+                sequence: Sequence::new(3).expect("safe sequence"),
+            }))
+            .expect("remote B down");
+        handle
+            .apply_controller_event(remote_disconnect())
+            .expect("remote disconnect");
+
+        let recording = state.lock().expect("recording state");
+        let keyboard_state = recording
+            .inputs
+            .iter()
+            .find(|(source, _)| *source == InputSourceId::new(1))
+            .expect("keyboard snapshot")
+            .1;
+        let remote_state = recording
+            .inputs
+            .iter()
+            .rev()
+            .find(|(source, _)| *source == InputSourceId::new(2))
+            .expect("remote snapshot")
+            .1;
+        assert!(keyboard_state.is_pressed(Button::A));
+        assert!(remote_state.is_pressed(Button::Left));
+        assert!(!remote_state.is_pressed(Button::A));
+        assert!(remote_state.is_pressed(Button::B));
+        assert_eq!(recording.clears.last(), Some(&InputSourceId::new(2)));
+        assert!(!recording.clears.contains(&InputSourceId::new(1)));
+        drop(recording);
+        assert_eq!(
+            runtime.snapshot().expect("ROM continues").phase,
+            RuntimePhase::Running
+        );
+        runtime.shutdown().expect("shutdown");
+        fs::remove_file(path).expect("remove ROM");
+    }
+
+    #[test]
+    fn remote_snapshot_survives_no_rom_restart_and_failed_replacement() {
+        let first = synthetic_rom_path();
+        let failed = synthetic_rom_path();
+        let recovered = synthetic_rom_path();
+        let factory = Arc::new(RecordingCoreFactory::default());
+        let state = Arc::clone(&factory.state);
+        let runtime = spawn_runtime(factory);
+        let handle = runtime.handle();
+
+        handle
+            .apply_controller_event(remote_connect())
+            .expect("remote connects");
+        handle
+            .apply_controller_event(remote_state_sync(
+                vec![NetworkButton::Right, NetworkButton::B],
+                1,
+            ))
+            .expect("retain before ROM");
+        runtime.open_rom(first.clone()).expect("first ROM loads");
+        assert_eq!(
+            state
+                .lock()
+                .expect("recording state")
+                .inputs
+                .iter()
+                .filter(|(source, _)| *source == InputSourceId::new(2))
+                .count(),
+            1
+        );
+
+        runtime.restart().expect("restart preserves remote input");
+        assert_eq!(
+            state
+                .lock()
+                .expect("recording state")
+                .inputs
+                .iter()
+                .filter(|(source, _)| *source == InputSourceId::new(2))
+                .count(),
+            2
+        );
+
+        state.lock().expect("recording state").fail_load = Some(CoreError::UnsupportedMapper(0x42));
+        let error = runtime
+            .open_rom(failed.clone())
+            .expect_err("replacement fails");
+        assert_eq!(error.code, RuntimeErrorCode::UnsupportedMapper);
+        assert_eq!(
+            runtime.snapshot().expect("error snapshot").phase,
+            RuntimePhase::Error
+        );
+        state.lock().expect("recording state").fail_load = None;
+        runtime
+            .open_rom(recovered.clone())
+            .expect("later replacement loads");
+
+        let recording = state.lock().expect("recording state");
+        let retained = recording
+            .inputs
+            .iter()
+            .rev()
+            .find(|(source, _)| *source == InputSourceId::new(2))
+            .expect("retained remote state")
+            .1;
+        assert!(retained.is_pressed(Button::Right));
+        assert!(retained.is_pressed(Button::B));
+        assert_eq!(
+            recording
+                .inputs
+                .iter()
+                .filter(|(source, _)| *source == InputSourceId::new(2))
+                .count(),
+            3
+        );
+        drop(recording);
+        runtime.shutdown().expect("shutdown");
+        fs::remove_file(first).expect("remove first ROM");
+        fs::remove_file(failed).expect("remove failed ROM");
+        fs::remove_file(recovered).expect("remove recovered ROM");
+    }
+
+    #[test]
+    fn remote_connected_is_ignored_and_handshake_or_ping_is_rejected() {
+        let runtime = spawn_runtime(Arc::new(RecordingCoreFactory::default()));
+        let handle = runtime.handle();
+        let connection_id = ControllerConnectionId::new("controller-1").expect("connection id");
+        handle
+            .apply_controller_event(ControllerEvent::Connected {
+                connection_id: connection_id.clone(),
+                input_source: InputSourceId::new(2),
+            })
+            .expect("connected has no core input");
+
+        for message in [
+            ClientMessage::Hello {
+                version: ProtocolVersion::V1,
+                token: "secret".into(),
+            },
+            ClientMessage::Ping {
+                sequence: Sequence::new(1).expect("safe sequence"),
+            },
+        ] {
+            let error = handle
+                .apply_controller_event(ControllerEvent::Message {
+                    connection_id: connection_id.clone(),
+                    input_source: InputSourceId::new(2),
+                    message,
+                })
+                .expect_err("handshake/heartbeat cannot reach runtime input");
+            assert_eq!(error.code, RuntimeErrorCode::InvalidLifecycle);
+        }
+        runtime.shutdown().expect("shutdown");
+    }
+
+    #[test]
+    fn remote_disconnect_clears_owned_source_once_without_an_input_snapshot() {
+        let path = synthetic_rom_path();
+        let factory = Arc::new(RecordingCoreFactory::default());
+        let state = Arc::clone(&factory.state);
+        let runtime = spawn_runtime(factory);
+        let handle = runtime.handle();
+        runtime.open_rom(path.clone()).expect("loads");
+        let first = ControllerConnectionId::new("controller-1").expect("first connection");
+        let second = ControllerConnectionId::new("controller-2").expect("second connection");
+
+        handle
+            .apply_controller_event(ControllerEvent::Connected {
+                connection_id: first.clone(),
+                input_source: InputSourceId::new(2),
+            })
+            .expect("first connection owns remote source");
+        handle
+            .apply_controller_event(ControllerEvent::Disconnected {
+                connection_id: first.clone(),
+                input_source: InputSourceId::new(2),
+            })
+            .expect("first disconnect clears without a snapshot");
+        handle
+            .apply_controller_event(ControllerEvent::Disconnected {
+                connection_id: first.clone(),
+                input_source: InputSourceId::new(2),
+            })
+            .expect("duplicate disconnect is idempotent");
+        handle
+            .apply_controller_event(ControllerEvent::Connected {
+                connection_id: second.clone(),
+                input_source: InputSourceId::new(2),
+            })
+            .expect("second connection owns remote source");
+        handle
+            .apply_controller_event(ControllerEvent::Disconnected {
+                connection_id: first,
+                input_source: InputSourceId::new(2),
+            })
+            .expect("old disconnect does not clear the new owner");
+
+        assert_eq!(
+            state
+                .lock()
+                .expect("recording state")
+                .clears
+                .iter()
+                .filter(|source| **source == InputSourceId::new(2))
+                .count(),
+            1
+        );
+        handle
+            .apply_controller_event(ControllerEvent::Disconnected {
+                connection_id: second,
+                input_source: InputSourceId::new(2),
+            })
+            .expect("new owner disconnect clears once");
+        assert_eq!(
+            state
+                .lock()
+                .expect("recording state")
+                .clears
+                .iter()
+                .filter(|source| **source == InputSourceId::new(2))
+                .count(),
+            2
+        );
+        runtime.shutdown().expect("shutdown");
+        fs::remove_file(path).expect("remove ROM");
+    }
+
+    #[test]
+    fn remote_generation_state_remains_constant_across_many_reconnections() {
+        let generations = super::ControllerGenerations::default();
+        let connection_count = super::COMMAND_QUEUE_CAPACITY + 10;
+        for index in 0..connection_count {
+            let connection_id =
+                ControllerConnectionId::new(format!("controller-{index}")).expect("connection id");
+            let generation = generations
+                .prepare(&ControllerEvent::Connected {
+                    connection_id: connection_id.clone(),
+                    input_source: InputSourceId::new(2),
+                })
+                .expect("connection accepted")
+                .expect("connection receives a generation");
+            assert_eq!(
+                generation,
+                u64::try_from(index + 1).expect("safe generation")
+            );
+            assert_eq!(
+                generations
+                    .prepare(&ControllerEvent::Disconnected {
+                        connection_id,
+                        input_source: InputSourceId::new(2),
+                    })
+                    .expect("disconnect accepted"),
+                Some(generation)
+            );
+        }
+        assert_eq!(
+            generations.next_generation.load(Ordering::Acquire),
+            u64::try_from(connection_count).expect("safe connection count")
+        );
+        assert_eq!(
+            generations.cancelled_through.load(Ordering::Acquire),
+            u64::try_from(connection_count).expect("safe connection count")
+        );
+        assert!(
+            generations
+                .current
+                .lock()
+                .expect("current connection")
+                .is_none()
+        );
+        assert_eq!(
+            generations
+                .prepare(&ControllerEvent::Message {
+                    connection_id: ControllerConnectionId::new("controller-0")
+                        .expect("stale connection"),
+                    input_source: InputSourceId::new(2),
+                    message: ClientMessage::StateSync {
+                        buttons: vec![NetworkButton::A],
+                        sequence: Sequence::new(1).expect("safe sequence"),
+                    },
+                })
+                .expect("stale event is ignored"),
+            None
+        );
+    }
+
+    #[test]
+    fn remote_button_mapping_is_exhaustive() {
+        for (network, core) in [
+            (NetworkButton::Up, Button::Up),
+            (NetworkButton::Down, Button::Down),
+            (NetworkButton::Left, Button::Left),
+            (NetworkButton::Right, Button::Right),
+            (NetworkButton::A, Button::A),
+            (NetworkButton::B, Button::B),
+            (NetworkButton::Start, Button::Start),
+            (NetworkButton::Select, Button::Select),
+        ] {
+            assert_eq!(super::map_network_button(network), core);
+        }
+    }
+
+    #[test]
+    fn remote_disconnect_retries_while_the_ui_command_queue_is_saturated() {
+        let path = synthetic_rom_path();
+        let factory = Arc::new(RecordingCoreFactory::default());
+        let state = Arc::clone(&factory.state);
+        let runtime = Arc::new(spawn_runtime(factory));
+        let handle = runtime.handle();
+        runtime.open_rom(path.clone()).expect("loads");
+        handle
+            .apply_controller_event(remote_connect())
+            .expect("remote connects");
+        handle
+            .apply_controller_event(remote_state_sync(vec![NetworkButton::A], 1))
+            .expect("remote input");
+
+        let release = Arc::new((Mutex::new(false), Condvar::new()));
+        let (entered_sender, entered_receiver) = mpsc::sync_channel(1);
+        let observer = BlockingControlObserver {
+            entered: entered_sender,
+            release: Arc::clone(&release),
+        };
+        let subscribing_runtime = Arc::clone(&runtime);
+        let subscribe = thread::spawn(move || subscribing_runtime.subscribe(Arc::new(observer)));
+        entered_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("worker is blocked");
+        runtime.test_only_fill_command_queue();
+
+        let (started_sender, started_receiver) = mpsc::sync_channel(1);
+        let disconnect = thread::spawn(move || {
+            started_sender.send(()).expect("signal retry start");
+            handle.apply_controller_event(remote_disconnect())
+        });
+        started_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("disconnect retry starts");
+        thread::sleep(Duration::from_millis(20));
+        let (lock, condition) = &*release;
+        *lock.lock().expect("release gate") = true;
+        condition.notify_one();
+
+        subscribe
+            .join()
+            .expect("subscription thread joins")
+            .expect("subscription completes");
+        disconnect
+            .join()
+            .expect("disconnect thread joins")
+            .expect("disconnect reaches worker");
+        assert_eq!(
+            state.lock().expect("recording state").clears.last(),
+            Some(&InputSourceId::new(2))
+        );
+        runtime.shutdown().expect("shutdown");
+        fs::remove_file(path).expect("remove ROM");
+    }
+
+    #[test]
+    fn remote_events_reject_non_remote_sources_before_mutating_keyboard_input() {
+        let path = synthetic_rom_path();
+        let factory = Arc::new(RecordingCoreFactory::default());
+        let state = Arc::clone(&factory.state);
+        let runtime = spawn_runtime(factory);
+        let handle = runtime.handle();
+        runtime.open_rom(path.clone()).expect("loads");
+        runtime
+            .set_keyboard_input(vec![RuntimeButton::A])
+            .expect("keyboard A");
+        let connection_id = ControllerConnectionId::new("controller-1").expect("connection id");
+
+        for event in [
+            ControllerEvent::Message {
+                connection_id: connection_id.clone(),
+                input_source: InputSourceId::new(1),
+                message: ClientMessage::StateSync {
+                    buttons: vec![NetworkButton::B],
+                    sequence: Sequence::new(1).expect("safe sequence"),
+                },
+            },
+            ControllerEvent::Disconnected {
+                connection_id: connection_id.clone(),
+                input_source: InputSourceId::new(1),
+            },
+            ControllerEvent::Connected {
+                connection_id,
+                input_source: InputSourceId::new(3),
+            },
+        ] {
+            let error = handle
+                .apply_controller_event(event)
+                .expect_err("only source 2 is accepted for remote events");
+            assert_eq!(error.code, RuntimeErrorCode::InvalidLifecycle);
+        }
+
+        let recording = state.lock().expect("recording state");
+        let keyboard_inputs = recording
+            .inputs
+            .iter()
+            .filter(|(source, _)| *source == InputSourceId::new(1))
+            .collect::<Vec<_>>();
+        assert_eq!(keyboard_inputs.len(), 1);
+        assert!(keyboard_inputs[0].1.is_pressed(Button::A));
+        assert!(!recording.clears.contains(&InputSourceId::new(1)));
+        assert!(
+            recording
+                .inputs
+                .iter()
+                .all(|(source, _)| *source != InputSourceId::new(3))
+        );
+        drop(recording);
+        runtime.shutdown().expect("shutdown");
+        fs::remove_file(path).expect("remove ROM");
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn remote_disconnect_generation_barrier_survives_timeout_churn() {
+        let first = synthetic_rom_path();
+        let replacement = synthetic_rom_path();
+        let factory = Arc::new(RecordingCoreFactory::default());
+        let state = Arc::clone(&factory.state);
+        let runtime = Arc::new(spawn_runtime(factory));
+        let handle = runtime.handle();
+        runtime.open_rom(first.clone()).expect("loads");
+        handle
+            .apply_controller_event(remote_connect())
+            .expect("remote connects");
+        handle
+            .apply_controller_event(remote_state_sync(vec![NetworkButton::A], 1))
+            .expect("remote input");
+
+        let release = Arc::new((Mutex::new(false), Condvar::new()));
+        let (entered_sender, entered_receiver) = mpsc::sync_channel(1);
+        let observer = BlockingControlObserver {
+            entered: entered_sender,
+            release: Arc::clone(&release),
+        };
+        let subscribing_runtime = Arc::clone(&runtime);
+        let subscribe = thread::spawn(move || subscribing_runtime.subscribe(Arc::new(observer)));
+        entered_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("worker is blocked");
+        runtime.test_only_fill_command_queue_slots(super::COMMAND_QUEUE_CAPACITY - 1);
+
+        let admitted_at = Instant::now();
+        let admitted_error = handle
+            .apply_controller_event(remote_state_sync(vec![NetworkButton::B], 2))
+            .expect_err("admitted state sync times out waiting for the blocked worker");
+        assert_eq!(admitted_error.code, RuntimeErrorCode::RuntimeUnavailable);
+        assert!(admitted_at.elapsed() >= super::RESPONSE_TIMEOUT);
+
+        let started = Instant::now();
+        let error = handle
+            .apply_controller_event(remote_disconnect())
+            .expect_err("disconnect admission times out while the worker remains blocked");
+        assert_eq!(error.code, RuntimeErrorCode::RuntimeUnavailable);
+        assert!(started.elapsed() >= Duration::from_millis(100));
+
+        for index in 0..(super::COMMAND_QUEUE_CAPACITY + 2) {
+            let connection_id = format!("churn-{index}");
+            let connected_error = handle
+                .apply_controller_event(remote_connect_from(&connection_id))
+                .expect_err("connected event cannot enter the saturated queue");
+            assert_eq!(connected_error.code, RuntimeErrorCode::RuntimeUnavailable);
+            let disconnected_error = handle
+                .apply_controller_event(ControllerEvent::Disconnected {
+                    connection_id: ControllerConnectionId::new(connection_id)
+                        .expect("churn connection"),
+                    input_source: InputSourceId::new(2),
+                })
+                .expect_err("disconnect barrier survives failed queue admission");
+            assert_eq!(
+                disconnected_error.code,
+                RuntimeErrorCode::RuntimeUnavailable
+            );
+        }
+        assert!(
+            handle
+                .controller_generations
+                .current
+                .lock()
+                .expect("current connection")
+                .is_none()
+        );
+
+        let (lock, condition) = &*release;
+        *lock.lock().expect("release gate") = true;
+        condition.notify_one();
+        let subscribe_error = subscribe
+            .join()
+            .expect("subscription thread joins")
+            .expect_err("blocked subscription also reaches its public timeout");
+        assert_eq!(subscribe_error.code, RuntimeErrorCode::RuntimeUnavailable);
+
+        let cleanup_deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            let clear_count = state
+                .lock()
+                .expect("recording state")
+                .clears
+                .iter()
+                .filter(|source| **source == InputSourceId::new(2))
+                .count();
+            if clear_count == 1 {
+                break;
+            }
+            assert!(Instant::now() < cleanup_deadline, "remote cleanup arrives");
+            thread::sleep(Duration::from_millis(1));
+        }
+
+        let replacement_observer = Arc::new(RecordingObserver::default());
+        let queue_deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            match runtime.subscribe(replacement_observer.clone()) {
+                Ok(_) => break,
+                Err(error)
+                    if error.code == RuntimeErrorCode::RuntimeUnavailable
+                        && Instant::now() < queue_deadline =>
+                {
+                    thread::sleep(Duration::from_millis(1));
+                }
+                Err(error) => panic!("observer replacement failed: {error:?}"),
+            }
+        }
+
+        let remote_input_count = state
+            .lock()
+            .expect("recording state")
+            .inputs
+            .iter()
+            .filter(|(source, _)| *source == InputSourceId::new(2))
+            .count();
+        assert_eq!(remote_input_count, 1, "queued stale state sync is ignored");
+        runtime.restart().expect("restart succeeds after cleanup");
+        runtime
+            .open_rom(replacement.clone())
+            .expect("replacement succeeds after cleanup");
+
+        handle
+            .apply_controller_event(remote_connect_from("controller-final"))
+            .expect("new connection is admitted after the barrier");
+        handle
+            .apply_controller_event(remote_message_from(
+                "controller-final",
+                ClientMessage::StateSync {
+                    buttons: vec![NetworkButton::Right],
+                    sequence: Sequence::new(1).expect("safe sequence"),
+                },
+            ))
+            .expect("a new connection remains valid");
+        handle
+            .apply_controller_event(remote_state_sync(vec![NetworkButton::B], 3))
+            .expect("stale messages are ignored without failing the sink");
+        handle
+            .apply_controller_event(remote_disconnect())
+            .expect("stale duplicate disconnect is idempotent");
+
+        let recording = state.lock().expect("recording state");
+        assert_eq!(
+            recording
+                .inputs
+                .iter()
+                .filter(|(source, _)| *source == InputSourceId::new(2))
+                .count(),
+            remote_input_count + 1
+        );
+        let new_connection_state = recording
+            .inputs
+            .iter()
+            .rev()
+            .find(|(source, _)| *source == InputSourceId::new(2))
+            .expect("new connection state")
+            .1;
+        assert!(new_connection_state.is_pressed(Button::Right));
+        assert!(!new_connection_state.is_pressed(Button::B));
+        assert_eq!(
+            recording
+                .clears
+                .iter()
+                .filter(|source| **source == InputSourceId::new(2))
+                .count(),
+            1
+        );
+        drop(recording);
+        runtime.shutdown().expect("shutdown");
+        fs::remove_file(first).expect("remove first ROM");
+        fs::remove_file(replacement).expect("remove replacement ROM");
+    }
 
     struct NoAudioFactory;
 
