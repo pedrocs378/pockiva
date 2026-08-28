@@ -1,0 +1,106 @@
+name: Release pull request
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: release-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate release candidate
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Validate release source
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          set -euo pipefail
+          if [[ "$HEAD_REF" != "develop" ]]; then
+            echo "::error::Release pull requests must use the develop head branch." >&2
+            exit 1
+          fi
+          if [[ "$HEAD_REPOSITORY" != "$GITHUB_REPOSITORY" ]]; then
+            echo "::error::Release pull requests must come from develop in $GITHUB_REPOSITORY." >&2
+            exit 1
+          fi
+
+      - name: Check out trusted release tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out release candidate as data
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: candidate
+          persist-credentials: false
+
+      - name: Install Node.js from trusted configuration
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: trusted/.tool-versions
+
+      - name: Validate versions and published tags
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          decision="$(node trusted/scripts/release-candidate.mjs \
+            --base-root "$GITHUB_WORKSPACE/trusted" \
+            --candidate-root "$GITHUB_WORKSPACE/candidate" \
+            --print-json)"
+
+          assert_tag_available() {
+            local tag="$1"
+            local endpoint
+            local error_file
+            for endpoint in \
+              "repos/$GITHUB_REPOSITORY/releases/tags/$tag" \
+              "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag"
+            do
+              error_file="$(mktemp)"
+              if gh api "$endpoint" >/dev/null 2>"$error_file"; then
+                echo "::error::Release tag $tag already exists." >&2
+                exit 1
+              fi
+              if ! grep -q 'HTTP 404' "$error_file"; then
+                cat "$error_file" >&2
+                echo "::error::Unable to verify whether release tag $tag exists." >&2
+                exit 1
+              fi
+              rm "$error_file"
+            done
+          }
+
+          decision_kind="$(jq -er '.kind' <<< "$decision")"
+          if [[ "$decision_kind" == "valid" ]]; then
+            decision_tag="$(jq -er '.tag' <<< "$decision")"
+            assert_tag_available "$decision_tag"
+            echo "Release candidate $decision_tag is valid and has no published tag collision."
+            exit 0
+          fi
+
+          if [[ "$decision_kind" == "patch-required" ]]; then
+            next_tag="$(jq -er '.nextTag' <<< "$decision")"
+            assert_tag_available "$next_tag"
+            echo "::error::Release candidate version equals main; PED-86 will replace this failure with a protected patch pull request for $next_tag." >&2
+            exit 1
+          fi
+
+          echo "::error::Trusted classifier returned unsupported decision kind: $decision_kind." >&2
+          exit 1
