@@ -136,12 +136,16 @@ fn mbc1_aliases_forbidden_switchable_banks_and_gates_ram() {
 }
 
 #[test]
-fn mbc1_normalizes_non_power_of_two_rom_before_forbidden_bank_alias() {
+fn mbc1_masks_unconnected_bank_bits_after_forbidden_bank_alias() {
+    let mut small = Mbc1::new(numbered_rom(4, 0x01, 0), 0, false, None).expect("MBC1 constructs");
+    small.write_rom(0x2000, 4, 0);
+    assert_eq!(small.read_rom(0x4000), 0);
+
     let mut mapper = Mbc1::new(numbered_rom(72, 0x01, 0), 0, false, None).expect("MBC1 constructs");
     mapper.write_rom(0x2000, 0, 0);
     mapper.write_rom(0x4000, 3, 0);
 
-    assert_eq!(mapper.read_rom(0x4000), 24);
+    assert_eq!(mapper.read_rom(0x4000), 25);
 }
 
 #[test]
