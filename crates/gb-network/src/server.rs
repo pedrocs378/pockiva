@@ -2,7 +2,7 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::fs;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
@@ -85,6 +85,7 @@ pub struct SessionServerConfig {
     pub input_source: InputSourceId,
     pub token_ttl: Duration,
     pub heartbeat_timeout: Duration,
+    pub input_rate_per_second: u64,
     pub entropy: Arc<dyn SessionEntropy>,
 }
 
@@ -104,6 +105,7 @@ impl SessionServerConfig {
             input_source,
             token_ttl: PRODUCTION_TOKEN_TTL,
             heartbeat_timeout: PRODUCTION_HEARTBEAT_TIMEOUT,
+            input_rate_per_second: RATE_PER_SECOND,
             entropy: Arc::new(OsSessionEntropy),
         })
     }
@@ -132,8 +134,7 @@ impl ControllerServer {
         config: SessionServerConfig,
         sink: Arc<dyn ControllerEventSink>,
     ) -> Result<(Self, PairingInfo), NetworkError> {
-        let controller_assets = fs::canonicalize(&config.controller_assets)
-            .map_err(|_| NetworkError::AssetsUnavailable)?;
+        let controller_assets = validate_controller_assets(&config.controller_assets)?;
         let index = controller_assets.join("index.html");
         if !index.is_file() {
             return Err(NetworkError::AssetsUnavailable);
@@ -209,12 +210,11 @@ impl ControllerServer {
             let _ = sender.send(());
         }
 
-        let thread = self
+        let mut server_thread = self
             .server_thread
             .lock()
-            .map_err(|_| NetworkError::ServerUnavailable)?
-            .take();
-        if let Some(thread) = thread {
+            .map_err(|_| NetworkError::ServerUnavailable)?;
+        if let Some(thread) = server_thread.take() {
             thread.join().map_err(|_| NetworkError::ServerUnavailable)?;
         }
         Ok(())
@@ -233,6 +233,7 @@ struct ServerState {
     expires_at: Instant,
     input_source: InputSourceId,
     heartbeat_timeout: Duration,
+    input_rate_per_second: u64,
     advertised_origin: String,
     entropy: Arc<dyn SessionEntropy>,
     sink: Arc<dyn ControllerEventSink>,
@@ -276,6 +277,7 @@ fn run_server_thread(
             expires_at,
             input_source: config.input_source,
             heartbeat_timeout: config.heartbeat_timeout,
+            input_rate_per_second: config.input_rate_per_second,
             advertised_origin,
             entropy: config.entropy,
             sink,
@@ -352,6 +354,8 @@ async fn upgrade_controller(
     state.socket_tasks.fetch_add(1, Ordering::AcqRel);
     let failed_upgrade_state = state.clone();
     upgrade
+        .max_message_size(MAX_TEXT_BYTES)
+        .max_frame_size(MAX_TEXT_BYTES)
         .on_failed_upgrade(move |_error: axum::Error| {
             finish_socket_task(&failed_upgrade_state);
         })
@@ -405,7 +409,8 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<ServerState>) {
         reject_and_close(&mut socket, RejectionReason::InvalidToken).await;
         return;
     }
-    let action = match machine.accept_hello(message, Instant::now()) {
+    let hello_received_at = Instant::now();
+    let action = match machine.accept_hello(message, hello_received_at) {
         Ok(action) => action,
         Err(error) => {
             reject_and_close(&mut socket, error.rejection_reason()).await;
@@ -437,7 +442,14 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<ServerState>) {
         return;
     }
 
-    run_message_loop(&mut socket, &state, &mut shutdown, &mut machine).await;
+    run_message_loop(
+        &mut socket,
+        &state,
+        &mut shutdown,
+        &mut machine,
+        hello_received_at,
+    )
+    .await;
     cleanup_connection(&state, &mut machine);
 }
 
@@ -446,16 +458,24 @@ async fn run_message_loop(
     state: &ServerState,
     shutdown: &mut watch::Receiver<bool>,
     machine: &mut SessionMachine,
+    mut last_valid_message_at: Instant,
 ) {
-    let mut limiter = InputRateLimiter::new(RATE_PER_SECOND, RATE_CAPACITY, Instant::now());
+    let mut limiter =
+        InputRateLimiter::new(state.input_rate_per_second, RATE_CAPACITY, Instant::now());
     loop {
+        let heartbeat_deadline = last_valid_message_at
+            .checked_add(state.heartbeat_timeout)
+            .unwrap_or(last_valid_message_at);
         let frame = tokio::select! {
             _ = shutdown.changed() => {
                 let _ = send_message(socket, &ServerMessage::ControllerDisconnected).await;
                 let _ = socket.send(Message::Close(None)).await;
                 break;
             }
-            received = tokio::time::timeout(state.heartbeat_timeout, socket.next()) => received,
+            received = tokio::time::timeout_at(
+                tokio::time::Instant::from_std(heartbeat_deadline),
+                socket.next(),
+            ) => received,
         };
         let Ok(Some(Ok(frame))) = frame else {
             break;
@@ -475,28 +495,64 @@ async fn run_message_loop(
             reject_and_close(socket, RejectionReason::MalformedMessage).await;
             break;
         }
-        match machine.apply(message, received_at) {
-            Ok(SessionAction::Input(event)) => {
+        let action = match machine.apply(message, received_at) {
+            Ok(action) => action,
+            Err(error) => {
+                reject_and_close(socket, error.rejection_reason()).await;
+                break;
+            }
+        };
+        last_valid_message_at = received_at;
+        match action {
+            SessionAction::Input(event) => {
                 if state.sink.publish(event, received_at).is_err() {
                     close_internal_error(socket).await;
                     break;
                 }
             }
-            Ok(SessionAction::Reply(reply)) => {
+            SessionAction::Reply(reply) => {
                 if !send_message(socket, &reply).await {
                     break;
                 }
             }
-            Ok(SessionAction::None | SessionAction::Connected { .. }) => {
+            SessionAction::None | SessionAction::Connected { .. } => {
                 reject_and_close(socket, RejectionReason::MalformedMessage).await;
-                break;
-            }
-            Err(error) => {
-                reject_and_close(socket, error.rejection_reason()).await;
                 break;
             }
         }
     }
+}
+
+fn validate_controller_assets(controller_assets: &Path) -> Result<PathBuf, NetworkError> {
+    let root_metadata =
+        fs::symlink_metadata(controller_assets).map_err(|_| NetworkError::AssetsUnavailable)?;
+    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+        return Err(NetworkError::AssetsUnavailable);
+    }
+
+    let canonical_root =
+        fs::canonicalize(controller_assets).map_err(|_| NetworkError::AssetsUnavailable)?;
+    validate_asset_tree(&canonical_root)?;
+    Ok(canonical_root)
+}
+
+fn validate_asset_tree(directory: &Path) -> Result<(), NetworkError> {
+    let entries = fs::read_dir(directory).map_err(|_| NetworkError::AssetsUnavailable)?;
+    for entry in entries {
+        let entry = entry.map_err(|_| NetworkError::AssetsUnavailable)?;
+        let metadata =
+            fs::symlink_metadata(entry.path()).map_err(|_| NetworkError::AssetsUnavailable)?;
+        let file_type = metadata.file_type();
+        if file_type.is_symlink() {
+            return Err(NetworkError::AssetsUnavailable);
+        }
+        if file_type.is_dir() {
+            validate_asset_tree(&entry.path())?;
+        } else if !file_type.is_file() {
+            return Err(NetworkError::AssetsUnavailable);
+        }
+    }
+    Ok(())
 }
 
 fn parse_client_frame(frame: Message) -> Result<ClientMessage, RejectionReason> {

@@ -59,6 +59,57 @@ struct RecordingSink {
     events: Mutex<Vec<ControllerEvent>>,
 }
 
+#[derive(Debug)]
+struct DelayedRecordingSink {
+    events: Mutex<Vec<ControllerEvent>>,
+    message_delay: Duration,
+}
+
+#[derive(Debug)]
+struct SlowDisconnectSink {
+    disconnect_delay: Duration,
+}
+
+impl ControllerEventSink for SlowDisconnectSink {
+    fn publish(
+        &self,
+        event: ControllerEvent,
+        _received_at: std::time::Instant,
+    ) -> Result<(), ControllerEventSinkError> {
+        if matches!(event, ControllerEvent::Disconnected { .. }) {
+            std::thread::sleep(self.disconnect_delay);
+        }
+        Ok(())
+    }
+}
+
+impl DelayedRecordingSink {
+    fn new(message_delay: Duration) -> Self {
+        Self {
+            events: Mutex::new(Vec::new()),
+            message_delay,
+        }
+    }
+
+    fn events(&self) -> Vec<ControllerEvent> {
+        self.events.lock().expect("events lock").clone()
+    }
+}
+
+impl ControllerEventSink for DelayedRecordingSink {
+    fn publish(
+        &self,
+        event: ControllerEvent,
+        _received_at: std::time::Instant,
+    ) -> Result<(), ControllerEventSinkError> {
+        self.events.lock().expect("events lock").push(event.clone());
+        if matches!(event, ControllerEvent::Message { .. }) {
+            std::thread::sleep(self.message_delay);
+        }
+        Ok(())
+    }
+}
+
 impl RecordingSink {
     fn events(&self) -> Vec<ControllerEvent> {
         self.events.lock().expect("events lock").clone()
@@ -83,6 +134,7 @@ fn config(assets: &Path, entropy: u8) -> SessionServerConfig {
         input_source: InputSourceId::new(2),
         token_ttl: Duration::from_secs(600),
         heartbeat_timeout: Duration::from_secs(18),
+        input_rate_per_second: 240,
         entropy: Arc::new(FixedEntropy(entropy)),
     }
 }
@@ -178,6 +230,20 @@ async fn wait_for_event_count(sink: &RecordingSink, expected: usize) -> Vec<Cont
     panic!("timed out waiting for {expected} events");
 }
 
+async fn wait_for_delayed_event_count(
+    sink: &DelayedRecordingSink,
+    expected: usize,
+) -> Vec<ControllerEvent> {
+    for _ in 0..300 {
+        let events = sink.events();
+        if events.len() >= expected {
+            return events;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    panic!("timed out waiting for {expected} delayed events");
+}
+
 #[tokio::test]
 async fn serves_assets_and_drives_one_authenticated_controller_over_a_real_socket() {
     let assets = TestAssets::new();
@@ -253,6 +319,38 @@ fn missing_asset_root_is_rejected_before_startup() {
         sink,
     );
     assert!(matches!(result, Err(NetworkError::AssetsUnavailable)));
+}
+
+#[test]
+fn symlinks_in_the_static_asset_tree_are_rejected_before_startup() {
+    let assets = TestAssets::new();
+    let outside = assets.root.with_extension("outside.txt");
+    fs::write(&outside, "outside controller root").expect("write outside file");
+    let link = assets.root.join("escaped.txt");
+    if let Err(error) = create_file_symlink(&outside, &link) {
+        let _ = fs::remove_file(&outside);
+        if cfg!(windows) && error.kind() == io::ErrorKind::PermissionDenied {
+            return;
+        }
+        panic!("create asset symlink: {error}");
+    }
+
+    let result = ControllerServer::start(
+        config(&assets.root, 0xce),
+        Arc::new(RecordingSink::default()),
+    );
+    let _ = fs::remove_file(&outside);
+    assert!(matches!(result, Err(NetworkError::AssetsUnavailable)));
+}
+
+#[cfg(unix)]
+fn create_file_symlink(original: &Path, link: &Path) -> io::Result<()> {
+    std::os::unix::fs::symlink(original, link)
+}
+
+#[cfg(windows)]
+fn create_file_symlink(original: &Path, link: &Path) -> io::Result<()> {
+    std::os::windows::fs::symlink_file(original, link)
 }
 
 #[tokio::test]
@@ -375,8 +473,23 @@ async fn rejects_oversized_binary_malformed_and_out_of_order_messages() {
         .expect("controller server starts");
     let token = token_from_pairing_url(&pairing.pairing_url).to_owned();
 
+    let event_count_before_connection = sink.events().len();
+    let mut oversized = connect_controller(&pairing.pairing_url).await;
+    authenticate(&mut oversized, &token).await;
+    oversized
+        .send(Message::Text("x".repeat(4_097).into()))
+        .await
+        .expect("send oversized frame");
+    let terminal = tokio::time::timeout(Duration::from_secs(1), oversized.next())
+        .await
+        .expect("transport rejects oversized frame promptly");
+    assert!(
+        matches!(terminal, None | Some(Err(_) | Ok(Message::Close(_)))),
+        "oversized frame must be rejected by the websocket transport before text parsing: {terminal:?}"
+    );
+    let _ = wait_for_event_count(&sink, event_count_before_connection + 2).await;
+
     for invalid_frame in [
-        Message::Text("x".repeat(4_097).into()),
         Message::Binary(vec![0, 1, 2].into()),
         Message::Text("not-json".into()),
     ] {
@@ -417,8 +530,10 @@ async fn rejects_oversized_binary_malformed_and_out_of_order_messages() {
 async fn rejects_a_burst_beyond_the_token_bucket_capacity() {
     let assets = TestAssets::new();
     let sink = Arc::new(RecordingSink::default());
-    let (server, pairing) = ControllerServer::start(config(&assets.root, 0x51), sink)
-        .expect("controller server starts");
+    let mut session_config = config(&assets.root, 0x51);
+    session_config.input_rate_per_second = 0;
+    let (server, pairing) =
+        ControllerServer::start(session_config, sink).expect("controller server starts");
     let token = token_from_pairing_url(&pairing.pairing_url).to_owned();
     let mut socket = connect_controller(&pairing.pairing_url).await;
     authenticate(&mut socket, &token).await;
@@ -461,6 +576,34 @@ async fn heartbeat_timeout_cleans_up_and_allows_reconnection() {
 }
 
 #[tokio::test]
+async fn heartbeat_deadline_is_measured_from_receive_time_not_after_sink_completion() {
+    let assets = TestAssets::new();
+    let sink = Arc::new(DelayedRecordingSink::new(Duration::from_millis(600)));
+    let mut session_config = config(&assets.root, 0x62);
+    session_config.heartbeat_timeout = Duration::from_millis(500);
+    let (server, pairing) =
+        ControllerServer::start(session_config, sink.clone()).expect("controller server starts");
+    let token = token_from_pairing_url(&pairing.pairing_url).to_owned();
+    let mut socket = connect_controller(&pairing.pairing_url).await;
+    authenticate(&mut socket, &token).await;
+
+    let sent_at = std::time::Instant::now();
+    send_json(
+        &mut socket,
+        serde_json::json!({"type":"state-sync","buttons":[],"sequence":0}),
+    )
+    .await;
+    let events = wait_for_delayed_event_count(&sink, 3).await;
+    assert!(matches!(events[2], ControllerEvent::Disconnected { .. }));
+    assert!(
+        sent_at.elapsed() < Duration::from_millis(900),
+        "deadline restarted after the sink completed: {:?}",
+        sent_at.elapsed()
+    );
+    server.shutdown().expect("server shutdown");
+}
+
+#[tokio::test]
 async fn explicit_shutdown_notifies_controller_and_cleans_up_once() {
     let assets = TestAssets::new();
     let sink = Arc::new(RecordingSink::default());
@@ -484,6 +627,47 @@ async fn explicit_shutdown_notifies_controller_and_cleans_up_once() {
             .count(),
         1
     );
+}
+
+#[tokio::test]
+async fn concurrent_shutdown_callers_both_wait_for_server_cleanup() {
+    let assets = TestAssets::new();
+    let sink = Arc::new(SlowDisconnectSink {
+        disconnect_delay: Duration::from_millis(400),
+    });
+    let (server, pairing) = ControllerServer::start(config(&assets.root, 0x72), sink)
+        .expect("controller server starts");
+    let server = Arc::new(server);
+    let token = token_from_pairing_url(&pairing.pairing_url).to_owned();
+    let mut socket = connect_controller(&pairing.pairing_url).await;
+    authenticate(&mut socket, &token).await;
+
+    let barrier = Arc::new(std::sync::Barrier::new(3));
+    let (finished_sender, finished_receiver) = std::sync::mpsc::channel();
+    let callers = (0..2)
+        .map(|_| {
+            let server = server.clone();
+            let barrier = barrier.clone();
+            let finished_sender = finished_sender.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                server.shutdown().expect("concurrent shutdown");
+                finished_sender
+                    .send(())
+                    .expect("report shutdown completion");
+            })
+        })
+        .collect::<Vec<_>>();
+    barrier.wait();
+    assert!(
+        finished_receiver
+            .recv_timeout(Duration::from_millis(200))
+            .is_err(),
+        "a concurrent shutdown returned before controller cleanup completed"
+    );
+    for caller in callers {
+        caller.join().expect("shutdown caller joins");
+    }
 }
 
 #[tokio::test]
