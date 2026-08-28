@@ -7,8 +7,10 @@
     "dev:remote": "pnpm --filter @gameboy/remote-controller dev --host",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
+    "release:check": "node scripts/release-config.mjs",
+    "release:test": "node --test scripts/release-config.test.mjs",
     "typecheck": "pnpm -r --if-present typecheck",
-    "test": "pnpm -r --if-present test",
+    "test": "pnpm run release:test && pnpm -r --if-present test",
     "test:watch": "pnpm -r --parallel --if-present test:watch",
     "test:coverage": "pnpm -r --if-present test:coverage"
   },

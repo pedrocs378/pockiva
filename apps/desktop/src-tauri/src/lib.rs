@@ -37,7 +37,9 @@ pub use contracts::{FoundationStatus, foundation_status};
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let controller_assets = app.path().resource_dir()?.join("controller");
             if !controller_assets.join("index.html").is_file() {
