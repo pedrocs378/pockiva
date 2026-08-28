@@ -65,6 +65,7 @@ jobs:
         run: |
           pnpm test
           pnpm build
+          pnpm release:check --check-bundle
 
       - name: Check Rust formatting and lint
         run: |
