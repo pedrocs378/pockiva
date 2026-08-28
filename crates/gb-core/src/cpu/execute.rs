@@ -90,7 +90,7 @@ pub(super) fn step(cpu: &mut Cpu, bus: &mut impl CpuBus) -> Result<StepResult, C
                 "illegal opcode {opcode:#04x} at {opcode_address:#06x}"
             )));
         }
-        let taken = execute_base(cpu, bus, opcode)?;
+        let taken = execute_base(cpu, bus, opcode);
         let target = if taken {
             decoded.cycles_taken
         } else {
@@ -236,7 +236,12 @@ fn pop(cpu: &mut Cpu, bus: &mut impl CpuBus) -> u16 {
     u16::from_le_bytes([low, high])
 }
 
-fn execute_base(cpu: &mut Cpu, bus: &mut impl CpuBus, opcode: u8) -> Result<bool, CoreError> {
+#[allow(
+    clippy::many_single_char_names,
+    clippy::match_same_arms,
+    clippy::too_many_lines
+)]
+fn execute_base(cpu: &mut Cpu, bus: &mut impl CpuBus, opcode: u8) -> bool {
     let x = opcode >> 6;
     let y = (opcode >> 3) & 7;
     let z = opcode & 7;
@@ -258,15 +263,15 @@ fn execute_base(cpu: &mut Cpu, bus: &mut impl CpuBus, opcode: u8) -> Result<bool
                     cpu.mode = CpuMode::Stopped;
                 }
                 3 => {
-                    let offset = fetch8(cpu, bus) as i8;
+                    let offset = i8::from_ne_bytes([fetch8(cpu, bus)]);
                     cpu.registers.pc = cpu.registers.pc.wrapping_add_signed(i16::from(offset));
                 }
                 _ => {
-                    let offset = fetch8(cpu, bus) as i8;
+                    let offset = i8::from_ne_bytes([fetch8(cpu, bus)]);
                     if condition(cpu, y - 4) {
                         cpu.registers.pc = cpu.registers.pc.wrapping_add_signed(i16::from(offset));
                     } else {
-                        return Ok(false);
+                        return false;
                     }
                 }
             },
@@ -344,7 +349,7 @@ fn execute_base(cpu: &mut Cpu, bus: &mut impl CpuBus, opcode: u8) -> Result<bool
                     if condition(cpu, y) {
                         cpu.registers.pc = pop(cpu, bus);
                     } else {
-                        return Ok(false);
+                        return false;
                     }
                 }
                 4 => {
@@ -352,7 +357,7 @@ fn execute_base(cpu: &mut Cpu, bus: &mut impl CpuBus, opcode: u8) -> Result<bool
                     bus.write8(0xff00 | u16::from(offset), cpu.registers.a);
                 }
                 5 => {
-                    let offset = fetch8(cpu, bus) as i8;
+                    let offset = i8::from_ne_bytes([fetch8(cpu, bus)]);
                     add_sp(cpu, offset, true);
                 }
                 6 => {
@@ -360,7 +365,7 @@ fn execute_base(cpu: &mut Cpu, bus: &mut impl CpuBus, opcode: u8) -> Result<bool
                     cpu.registers.a = bus.read8(0xff00 | u16::from(offset));
                 }
                 _ => {
-                    let offset = fetch8(cpu, bus) as i8;
+                    let offset = i8::from_ne_bytes([fetch8(cpu, bus)]);
                     add_sp(cpu, offset, false);
                 }
             },
@@ -387,7 +392,7 @@ fn execute_base(cpu: &mut Cpu, bus: &mut impl CpuBus, opcode: u8) -> Result<bool
                     if condition(cpu, y) {
                         cpu.registers.pc = address;
                     } else {
-                        return Ok(false);
+                        return false;
                     }
                 } else {
                     match y {
@@ -421,7 +426,7 @@ fn execute_base(cpu: &mut Cpu, bus: &mut impl CpuBus, opcode: u8) -> Result<bool
                     push(cpu, bus, cpu.registers.pc);
                     cpu.registers.pc = address;
                 } else {
-                    return Ok(false);
+                    return false;
                 }
             }
             5 => {
@@ -443,7 +448,7 @@ fn execute_base(cpu: &mut Cpu, bus: &mut impl CpuBus, opcode: u8) -> Result<bool
             }
         },
     }
-    Ok(true)
+    true
 }
 
 fn alu(cpu: &mut Cpu, operation: u8, value: u8) {
@@ -504,7 +509,7 @@ fn add_hl(cpu: &mut Cpu, value: u16) {
 
 fn add_sp(cpu: &mut Cpu, offset: i8, to_sp: bool) {
     let sp = cpu.registers.sp;
-    let unsigned = u16::from(offset as u8);
+    let unsigned = u16::from(offset.to_ne_bytes()[0]);
     let result = sp.wrapping_add_signed(i16::from(offset));
     let mut flags = Flags::default();
     flags.set(Flags::H, (sp & 0x0f) + (unsigned & 0x0f) > 0x0f);

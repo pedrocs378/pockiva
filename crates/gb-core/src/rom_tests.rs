@@ -29,7 +29,7 @@ fn blargg(path: &str) -> PathBuf {
     rom_root().join("blargg").join(path)
 }
 
-fn run_rom(path: &Path, max_t_cycles: u64, signal: RomSignal) -> Result<(), String> {
+fn run_rom(path: &Path, max_t_cycles: u64, signal: &RomSignal) -> Result<(), String> {
     let rom = fs::read(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
     let mut core = GameBoy::new(
         FixedClock,
@@ -60,7 +60,7 @@ fn run_rom(path: &Path, max_t_cycles: u64, signal: RomSignal) -> Result<(), Stri
             }
             RomSignal::MooneyeRegisters(expected) if breakpoint => {
                 let actual = core.diagnostic_registers();
-                if actual == expected {
+                if actual == *expected {
                     return Ok(());
                 }
                 if actual == [0x42; 6] {
@@ -85,7 +85,7 @@ macro_rules! mooneye_test {
             run_rom(
                 &mooneye($path),
                 50_000_000,
-                RomSignal::MooneyeRegisters([3, 5, 8, 13, 21, 34]),
+                &RomSignal::MooneyeRegisters([3, 5, 8, 13, 21, 34]),
             )
             .expect("Mooneye ROM passes");
         }
@@ -109,7 +109,7 @@ fn rom_blargg_cpu_instrs() {
     run_rom(
         &blargg("cpu_instrs/cpu_instrs.gb"),
         2_000_000_000,
-        RomSignal::BlarggSerial("Passed"),
+        &RomSignal::BlarggSerial("Passed"),
     )
     .expect("Blargg CPU instructions pass");
 }
@@ -120,7 +120,7 @@ fn rom_blargg_instr_timing() {
     run_rom(
         &blargg("instr_timing/instr_timing.gb"),
         200_000_000,
-        RomSignal::BlarggSerial("Passed"),
+        &RomSignal::BlarggSerial("Passed"),
     )
     .expect("Blargg instruction timing passes");
 }

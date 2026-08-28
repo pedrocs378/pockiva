@@ -66,7 +66,7 @@ fn oam_dma_copies_one_byte_per_machine_cycle_and_blocks_non_hram_cpu_access() {
 fn serial_capture_is_bounded() {
     let mut bus = test_bus();
     for value in 0..4200_u16 {
-        bus.write_unclocked(0xff01, value as u8);
+        bus.write_unclocked(0xff01, value.to_le_bytes()[0]);
         bus.write_unclocked(0xff02, 0x81);
     }
     assert_eq!(bus.serial_output().len(), 4096);

@@ -5,7 +5,7 @@ use crate::CoreError;
 use crate::interrupts::{Interrupt, InterruptMask};
 
 struct TestBus {
-    memory: Box<[u8; 0x1_0000]>,
+    memory: Box<[u8]>,
     elapsed_t_cycles: u64,
     pending: InterruptMask,
     divider_reset: bool,
@@ -14,7 +14,7 @@ struct TestBus {
 impl Default for TestBus {
     fn default() -> Self {
         Self {
-            memory: Box::new([0; 0x1_0000]),
+            memory: vec![0; 0x1_0000].into_boxed_slice(),
             elapsed_t_cycles: 0,
             pending: InterruptMask::default(),
             divider_reset: false,

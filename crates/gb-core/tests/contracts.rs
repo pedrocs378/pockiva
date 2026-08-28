@@ -2,7 +2,7 @@ use std::num::NonZeroU32;
 
 use gb_core::{
     AudioBatch, BatteryState, Button, CartridgeMetadata, Clock, CoreError, EmulatorCore, Frame,
-    InputSourceId, JoypadState, RunOutcome, SCREEN_HEIGHT, SCREEN_WIDTH,
+    GameBoy, InputSourceId, JoypadState, RunOutcome, SCREEN_HEIGHT, SCREEN_WIDTH,
 };
 
 struct FixedClock(u64);
@@ -92,4 +92,11 @@ fn audio_batch_exposes_a_non_zero_sample_rate() {
     let batch = AudioBatch::empty(sample_rate);
 
     assert_eq!(batch.sample_rate(), sample_rate);
+}
+
+fn assert_emulator_thread_bound<T: EmulatorCore + Send>() {}
+
+#[test]
+fn concrete_core_satisfies_the_runtime_thread_contract() {
+    assert_emulator_thread_bound::<GameBoy<FixedClock>>();
 }

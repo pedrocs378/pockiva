@@ -114,12 +114,12 @@ impl Timer {
     }
 
     #[cfg(test)]
-    fn for_test(tima: u8, tma: u8, tac: u8) -> Self {
+    fn for_test(counter: u8, modulo: u8, control: u8) -> Self {
         Self {
             divider: 0,
-            tima,
-            tma,
-            tac,
+            tima: counter,
+            tma: modulo,
+            tac: control,
             reload_delay: None,
             reloaded_this_cycle: false,
         }

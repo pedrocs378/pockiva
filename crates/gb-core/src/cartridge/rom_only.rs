@@ -16,12 +16,10 @@ impl RomOnly {
         persisted: Option<&BatteryState>,
     ) -> Result<Self, CoreError> {
         let ram = persisted_ram(persisted, ram_bytes, has_battery)?;
-        if let Some(state) = persisted {
-            if !state.mapper_data().is_empty() {
-                return Err(CoreError::InvalidRom(
-                    "ROM-only persisted mapper data must be empty".into(),
-                ));
-            }
+        if persisted.is_some_and(|state| !state.mapper_data().is_empty()) {
+            return Err(CoreError::InvalidRom(
+                "ROM-only persisted mapper data must be empty".into(),
+            ));
         }
         Ok(Self {
             rom,

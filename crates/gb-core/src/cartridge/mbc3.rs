@@ -79,11 +79,11 @@ impl RtcState {
         let days = counter / 86_400;
         let in_day = counter % 86_400;
         [
-            (in_day % 60) as u8,
-            ((in_day / 60) % 60) as u8,
-            (in_day / 3_600) as u8,
-            days as u8,
-            ((days >> 8) as u8 & 1) | (u8::from(self.halted) << 6) | (u8::from(carry) << 7),
+            u8::try_from(in_day % 60).expect("seconds are below 60"),
+            u8::try_from((in_day / 60) % 60).expect("minutes are below 60"),
+            u8::try_from(in_day / 3_600).expect("hours are below 24"),
+            days.to_le_bytes()[0],
+            (days.to_le_bytes()[1] & 1) | (u8::from(self.halted) << 6) | (u8::from(carry) << 7),
         ]
     }
 
@@ -232,7 +232,7 @@ impl Mapper for Mbc3 {
         }
         match self.selector {
             0x00..=0x03 => {
-                write_ram_byte(&mut self.ram, usize::from(self.selector), address, value)
+                write_ram_byte(&mut self.ram, usize::from(self.selector), address, value);
             }
             0x08..=0x0c => {
                 if let Some(rtc) = self.rtc.as_mut() {

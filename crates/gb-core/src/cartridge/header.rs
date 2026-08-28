@@ -4,6 +4,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{CartridgeMetadata, CompatibilityMode, CoreError, MapperKind};
 
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Features {
     pub(super) mapper: MapperKind,
@@ -142,12 +143,12 @@ fn validate_capacity(
     rom_banks: usize,
     ram_bytes: usize,
 ) -> Result<(), CoreError> {
-    let ram_banks = ram_bytes.div_ceil(0x2000);
+    let external_ram_banks = ram_bytes.div_ceil(0x2000);
     let valid = match features.mapper {
         MapperKind::RomOnly => rom_banks <= 2 && ram_bytes <= 0x2000,
-        MapperKind::Mbc1 | MapperKind::Mbc3 => rom_banks <= 128 && ram_banks <= 4,
-        MapperKind::Mbc5 if features.has_rumble => rom_banks <= 512 && ram_banks <= 8,
-        MapperKind::Mbc5 => rom_banks <= 512 && ram_banks <= 16,
+        MapperKind::Mbc1 | MapperKind::Mbc3 => rom_banks <= 128 && external_ram_banks <= 4,
+        MapperKind::Mbc5 if features.has_rumble => rom_banks <= 512 && external_ram_banks <= 8,
+        MapperKind::Mbc5 => rom_banks <= 512 && external_ram_banks <= 16,
     };
     if valid {
         Ok(())

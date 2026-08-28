@@ -21,12 +21,10 @@ impl Mbc1 {
         persisted: Option<&BatteryState>,
     ) -> Result<Self, CoreError> {
         let ram = persisted_ram(persisted, ram_bytes, has_battery)?;
-        if let Some(state) = persisted {
-            if !state.mapper_data().is_empty() {
-                return Err(CoreError::InvalidRom(
-                    "MBC1 persisted mapper data must be empty".into(),
-                ));
-            }
+        if persisted.is_some_and(|state| !state.mapper_data().is_empty()) {
+            return Err(CoreError::InvalidRom(
+                "MBC1 persisted mapper data must be empty".into(),
+            ));
         }
         let rom_banks = rom.len() / 0x4000;
         Ok(Self {
@@ -51,7 +49,7 @@ impl Mbc1 {
 
     fn switch_bank(&self) -> usize {
         let mut bank = (usize::from(self.bank_high) << 5) | usize::from(self.rom_bank_low);
-        if bank & 0x1f == 0 {
+        if bank.trailing_zeros() >= 5 {
             bank += 1;
         }
         bank % self.rom_banks

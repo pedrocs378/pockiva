@@ -57,7 +57,7 @@ impl VideoDevice for VideoRegisters {
             0x8000..=0x9fff => self.vram[usize::from(address - 0x8000)] = value,
             0xfe00..=0xfe9f => self.oam[usize::from(address - 0xfe00)] = value,
             0xff40..=0xff4b if address != 0xff44 => {
-                self.registers[usize::from(address - 0xff40)] = value
+                self.registers[usize::from(address - 0xff40)] = value;
             }
             _ => {}
         }

@@ -26,9 +26,10 @@ fn rom_size_code(banks: usize) -> u8 {
 fn numbered_rom(banks: usize, type_byte: u8, ram_code: u8) -> Vec<u8> {
     let mut rom = vec![0; banks * 0x4000];
     for bank in 0..banks {
-        rom[bank * 0x4000..(bank + 1) * 0x4000].fill(bank as u8);
-        rom[bank * 0x4000] = bank as u8;
-        rom[bank * 0x4000 + 1] = (bank >> 8) as u8;
+        let [low, high, ..] = bank.to_le_bytes();
+        rom[bank * 0x4000..(bank + 1) * 0x4000].fill(low);
+        rom[bank * 0x4000] = low;
+        rom[bank * 0x4000 + 1] = high;
     }
     rom[0x0134..0x013b].copy_from_slice(b"PED-35 ");
     rom[0x0143] = 0;

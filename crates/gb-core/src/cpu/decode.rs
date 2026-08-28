@@ -45,6 +45,7 @@ pub(crate) fn decode(opcode: u8, prefixed: bool) -> DecodedInstruction {
     }
 }
 
+#[allow(clippy::match_same_arms)]
 fn base_metadata(opcode: u8) -> (u8, u8, u8) {
     let x = opcode >> 6;
     let y = (opcode >> 3) & 7;
@@ -65,8 +66,7 @@ fn base_metadata(opcode: u8) -> (u8, u8, u8) {
                     (1, 8, 8)
                 }
             }
-            2 => (1, 8, 8),
-            3 => (1, 8, 8),
+            2 | 3 => (1, 8, 8),
             4 | 5 => (1, if y == 6 { 12 } else { 4 }, if y == 6 { 12 } else { 4 }),
             6 => (2, if y == 6 { 12 } else { 8 }, if y == 6 { 12 } else { 8 }),
             _ => (1, 4, 4),

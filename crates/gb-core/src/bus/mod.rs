@@ -103,7 +103,6 @@ impl MachineBus {
             0x8000..=0x9fff | 0xfe00..=0xfe9f | 0xff40..=0xff4b => self.video.read(address),
             0xc000..=0xdfff => self.wram[usize::from(address - 0xc000)],
             0xe000..=0xfdff => self.wram[usize::from(address - 0xe000)],
-            0xfea0..=0xfeff => 0xff,
             0xff00 => self.joypad.read(),
             0xff01..=0xff02 => self.serial.read(address),
             0xff04..=0xff07 => self.timer.read(address),
@@ -136,7 +135,6 @@ impl MachineBus {
                 self.wram[usize::from(address - 0xe000)] = value;
                 InterruptMask::default()
             }
-            0xfea0..=0xfeff => InterruptMask::default(),
             0xff00 => self.joypad.write(value),
             0xff01..=0xff02 => self.serial.write(address, value),
             0xff04..=0xff07 => self.timer.write(address, value),

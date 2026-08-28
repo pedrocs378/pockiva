@@ -73,10 +73,10 @@ pub(crate) struct InterruptRegisters {
 }
 
 impl InterruptRegisters {
-    pub(crate) const fn read_if(&self) -> u8 {
+    pub(crate) const fn read_if(self) -> u8 {
         0xe0 | self.flags.bits()
     }
-    pub(crate) const fn read_ie(&self) -> u8 {
+    pub(crate) const fn read_ie(self) -> u8 {
         self.enable.bits()
     }
     pub(crate) fn write_if(&mut self, value: u8) {
@@ -88,7 +88,7 @@ impl InterruptRegisters {
     pub(crate) fn request(&mut self, mask: InterruptMask) {
         self.flags = self.flags.union(mask);
     }
-    pub(crate) const fn pending(&self) -> InterruptMask {
+    pub(crate) const fn pending(self) -> InterruptMask {
         self.enable.intersection(self.flags)
     }
     pub(crate) fn acknowledge(&mut self, interrupt: Interrupt) {
