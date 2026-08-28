@@ -128,7 +128,11 @@ mod queue {
         assert!(producer.health().flush_pending);
         output.fill(9.0);
         consumer.fill(&mut output);
-        assert!(output.into_iter().all(|sample| sample.abs() <= f32::EPSILON));
+        assert!(
+            output
+                .into_iter()
+                .all(|sample| sample.abs() <= f32::EPSILON)
+        );
         assert!(!producer.health().flush_pending);
         assert_eq!(producer.health().queued_stereo_frames, 0);
     }

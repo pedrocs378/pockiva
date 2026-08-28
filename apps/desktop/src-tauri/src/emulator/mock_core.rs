@@ -12,15 +12,26 @@ use gb_core::{
 
 use super::runtime::{CoreFactory, RuntimeCore};
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ContractMockCore {
     loaded: bool,
     sequence: u64,
     frame: Option<Frame>,
     inputs: HashMap<InputSourceId, JoypadState>,
+    sample_rate: NonZeroU32,
 }
 
 impl ContractMockCore {
+    fn new(sample_rate: NonZeroU32) -> Self {
+        Self {
+            loaded: false,
+            sequence: 0,
+            frame: None,
+            inputs: HashMap::new(),
+            sample_rate,
+        }
+    }
+
     fn diagnostic_frame(&self) -> Result<Frame, CoreError> {
         const PALETTE: [[u8; 4]; 4] = [
             [224, 248, 208, 255],
@@ -99,7 +110,7 @@ impl EmulatorCore for ContractMockCore {
     }
 
     fn drain_audio(&mut self) -> AudioBatch {
-        AudioBatch::empty(NonZeroU32::new(48_000).expect("48 kHz is non-zero"))
+        AudioBatch::empty(self.sample_rate)
     }
 
     fn battery_state(&self) -> Option<BatteryState> {
@@ -110,21 +121,43 @@ impl EmulatorCore for ContractMockCore {
 #[derive(Debug, Default)]
 pub struct ContractMockCoreFactory;
 
+#[derive(Debug)]
+pub struct NegotiatedContractMockCoreFactory {
+    sample_rate: NonZeroU32,
+}
+
+impl ContractMockCoreFactory {
+    #[must_use]
+    pub fn with_sample_rate(sample_rate: NonZeroU32) -> NegotiatedContractMockCoreFactory {
+        NegotiatedContractMockCoreFactory { sample_rate }
+    }
+}
+
 impl CoreFactory for ContractMockCoreFactory {
     fn create(&self) -> Box<dyn RuntimeCore> {
-        Box::new(ContractMockCore::default())
+        Box::new(ContractMockCore::new(
+            NonZeroU32::new(48_000).expect("48 kHz is non-zero"),
+        ))
+    }
+}
+
+impl CoreFactory for NegotiatedContractMockCoreFactory {
+    fn create(&self) -> Box<dyn RuntimeCore> {
+        Box::new(ContractMockCore::new(self.sample_rate))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroU32;
+
     use gb_core::{Button, CoreError, EmulatorCore, InputSourceId, JoypadState};
 
     use super::ContractMockCore;
 
     #[test]
     fn contract_mock_rejects_only_empty_rom_bytes() {
-        let mut core = ContractMockCore::default();
+        let mut core = ContractMockCore::new(NonZeroU32::new(48_000).expect("non-zero rate"));
         assert!(matches!(
             core.load_rom(&[], None),
             Err(CoreError::InvalidRom(_))
@@ -141,7 +174,7 @@ mod tests {
 
     #[test]
     fn contract_mock_requires_a_loaded_rom_for_reset() {
-        let mut core = ContractMockCore::default();
+        let mut core = ContractMockCore::new(NonZeroU32::new(48_000).expect("non-zero rate"));
         assert_eq!(core.reset(), Err(CoreError::NotLoaded));
         core.load_rom(b"fixture", None).expect("loads");
         core.reset().expect("loaded mock resets");
@@ -149,7 +182,7 @@ mod tests {
 
     #[test]
     fn contract_mock_preserves_source_aware_input() {
-        let mut core = ContractMockCore::default();
+        let mut core = ContractMockCore::new(NonZeroU32::new(48_000).expect("non-zero rate"));
         core.load_rom(b"fixture", None).expect("loads");
         let mut state = JoypadState::default();
         state.press(Button::Left);
@@ -162,7 +195,7 @@ mod tests {
 
     #[test]
     fn contract_mock_produces_monotonic_frames_and_empty_audio() {
-        let mut core = ContractMockCore::default();
+        let mut core = ContractMockCore::new(NonZeroU32::new(44_100).expect("non-zero rate"));
         core.load_rom(b"fixture", None).expect("loads");
 
         let first = core.run_cycles(70_224).expect("runs");
@@ -177,7 +210,7 @@ mod tests {
         assert_ne!(first_frame.rgba(), second_frame.rgba());
 
         let audio = core.drain_audio();
-        assert_eq!(audio.sample_rate().get(), 48_000);
+        assert_eq!(audio.sample_rate().get(), 44_100);
         assert_eq!(audio.stereo_frame_count(), 0);
         assert!(core.battery_state().is_none());
     }
