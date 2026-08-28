@@ -6,10 +6,22 @@ This runbook validates Pockiva's updater and release path without publishing a r
 
 - Pull requests targeting `develop` run `Quality and tests`, `Desktop compile (macOS Apple Silicon)`, and `Desktop compile (Windows x64)`. The full CI does not run on pushes or on pull requests targeting another branch.
 - Pull requests targeting `main` must come from `develop` in `pedrocs378/pockiva`. Their only required workflow check is `Validate release candidate`, which compares metadata from isolated base and candidate checkouts using the trusted script from `main`.
-- A candidate version greater than `main` passes only when its release and Git tag do not exist. A lower, malformed, divergent, or colliding version fails closed.
-- Until PED-86 adds the protected GitHub App recovery, a candidate equal to `main` verifies that the expected patch tag is available and then fails with an explicit PED-86 message. This gate is read-only: it does not create branches, pull requests, tags, releases, or builds.
+- A candidate version greater than `main` passes only when its release and Git tag do not exist. It does not mint an App token or perform writes. A lower, malformed, divergent, or colliding version fails closed.
+- A candidate equal to `main` verifies that the expected patch tag is available, then revalidates the live release pull request before minting a short-lived token for the repository-scoped Pockiva release GitHub App. The App creates or reuses `automation/release-pr-<release PR number>-patch`, opens one pull request to `develop`, and enables squash auto-merge. The release check remains failing until the bot pull request merges and the synchronized release pull request is validated again with a greater version. The App never pushes directly to `develop` or `main` and receives no branch-protection bypass.
+- Before creating or reusing the pull request, the trusted script from `main` calculates the exact patch tree. The gate accepts only changes to `Cargo.lock`, `Cargo.toml`, `apps/desktop/package.json`, and `apps/desktop/src-tauri/tauri.conf.json`. A stale branch, unexpected tree, missing pull request, duplicate pull request, or other inconsistent remote state fails closed without force-pushing.
 
-The first `develop -> main` release is a bootstrap exception. GitHub loads `pull_request_target` workflows from the base branch, and the current `main` does not contain `release-pr.yml` yet. The first release pull request therefore carries the explicit `0.1.1` bump from PED-84 and uses the checks already configured on `main`. After that merge and the PED-86 provisioning, require only `Validate release candidate` on `main`; keep the three task CI contexts required on `develop`.
+The first `develop -> main` release is a bootstrap exception. GitHub loads `pull_request_target` workflows from the base branch, and the current `main` does not contain `release-pr.yml` yet. The first release pull request therefore carries the explicit `0.1.1` bump from PED-84 and uses the checks already configured on `main`. After that merge and the GitHub App provisioning, require only `Validate release candidate` on `main`; keep the three task CI contexts required on `develop`.
+
+## GitHub App setup
+
+The dedicated App `pockiva-release-bot-pedrocs378` is installed only on `pedrocs378/pockiva`. It needs repository `Contents: Read and write` and `Pull requests: Read and write`; metadata read access is implicit. Do not grant administration access or a branch-protection bypass. Repository auto-merge and automatic deletion of integrated branches must be enabled so the bot can request, but not bypass, the protected squash merge.
+
+Store only these secret names at repository scope:
+
+- `POCKIVA_RELEASE_APP_ID`
+- `POCKIVA_RELEASE_APP_PRIVATE_KEY`
+
+Never print or copy their values into logs, artifacts, documentation, pull-request bodies, or application bundles. The workflow requests the App token only after the trusted classifier returns `patch-required` for a same-repository `develop` release pull request.
 
 ## Pre-release checks
 
@@ -32,6 +44,8 @@ The workflow creates or resumes an unpublished draft for `v<version>`, then runs
 Only after both platform entries and signatures are present does the workflow publish the draft and mark it as the latest release. The frontend bundle is scanned after each native build to ensure that updater private-key material was not exposed by Vite.
 
 ## Failure and recovery
+
+If the bot pull request is still open, rerunning or synchronizing the release gate reuses it, requests squash auto-merge again, and remains blocking. Do not modify its branch manually. A CI failure leaves the bot pull request open for diagnosis and keeps the release candidate from becoming a publishable version; fix the underlying cause through a normal Linear task branch and let the original release pull request synchronize. A rerun tied to an older release event fails closed after its deterministic bot pull request has closed or merged; it never recreates that branch. If the deterministic remote branch exists without the expected open pull request, remove or reconcile that state only through an explicitly reviewed recovery operation—the workflow intentionally refuses to overwrite it.
 
 If preparation or either build fails, keep the GitHub release as a draft and inspect the failed job. After fixing the cause, rerun the failed workflow for the same merged commit. Preparation accepts the existing draft only when its tag still points to that exact commit; a published version, a conflicting tag, or a draft pointing elsewhere fails closed.
 

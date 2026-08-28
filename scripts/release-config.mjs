@@ -117,6 +117,14 @@ export const validateReleaseWorkflow = async (root = repositoryRoot) => {
     readFile(join(root, '.github/workflows/release.yml'), 'utf8'),
     readFile(join(root, '.github/workflows/release-pr.yml'), 'utf8')
   ])
+  const permissionBlocks = [...releasePrWorkflow.matchAll(/^([ \t]*)permissions\s*:/gm)]
+  if (
+    permissionBlocks.length !== 1 ||
+    permissionBlocks[0][1] !== '' ||
+    !/^permissions:\n {2}contents: read\n {2}pull-requests: read$/m.test(releasePrWorkflow)
+  ) {
+    throw new Error('Release pull-request gate must define exactly one top-level read-only permissions block')
+  }
   const requirements = [
     ['closed pull request trigger', /pull_request:[\s\S]*branches:\s*\[main\][\s\S]*types:\s*\[closed\]/],
     ['merged guard', /github\.event\.pull_request\.merged\s*==\s*true/],
@@ -151,12 +159,21 @@ export const validateReleaseWorkflow = async (root = repositoryRoot) => {
       /ref:\s*\$\{\{ github\.event\.pull_request\.head\.sha \}\}[\s\S]*path:\s*candidate/
     ],
     ['trusted release classifier', /node trusted\/scripts\/release-candidate\.mjs/],
-    ['trusted Node.js version file', /node-version-file:\s*trusted\/\.tool-versions/]
+    ['trusted Node.js version file', /node-version-file:\s*trusted\/\.tool-versions/],
+    [
+      'conditional App token',
+      /if:\s*steps\.release-decision\.outputs\.kind == 'patch-required'[\s\S]*uses:\s*actions\/create-github-app-token@[0-9a-f]{40}/
+    ],
+    ['least-privilege App token permissions', /permission-contents:\s*write[\s\S]*permission-pull-requests:\s*write/],
+    ['deterministic automation branch', /automation\/release-pr-\$\{\{ github\.event\.pull_request\.number \}\}-patch/],
+    ['trusted version bump', /node trusted\/scripts\/version-bump\.mjs patch/],
+    ['protected patch pull request', /gh pr create[\s\S]*--base develop/],
+    ['squash auto-merge', /gh pr merge[\s\S]*--auto[\s\S]*--squash/]
   ]
   for (const [label, pattern] of releasePrRequirements) {
     if (!pattern.test(releasePrWorkflow)) throw new Error(`Release pull-request gate is missing ${label}`)
   }
-  if (/^\s*[^#\n]+:\s*write\s*$/m.test(releasePrWorkflow)) {
+  if (/^ {2}\S[^#\n]*:\s*write\s*$/m.test(releasePrWorkflow)) {
     throw new Error('Release pull-request gate must keep read-only permissions')
   }
   if ((releasePrWorkflow.match(/^\s{4}runs-on:/gm)?.length ?? 0) !== 1) {
@@ -169,12 +186,12 @@ export const validateReleaseWorkflow = async (root = repositoryRoot) => {
     /cargo (?:build|check|test)/,
     /tauri-action/,
     /gh release (?:create|edit|upload)/,
-    /TAURI_SIGNING_PRIVATE_KEY/,
-    /POCKIVA_RELEASE_APP/,
-    /secrets\./
+    /TAURI_SIGNING_PRIVATE_KEY/
   ]
   if (forbiddenReleasePrPatterns.some((pattern) => pattern.test(releasePrWorkflow))) {
-    throw new Error('Release pull-request gate must remain read-only and must not build or use release secrets')
+    throw new Error(
+      'Release pull-request gate must remain top-level read-only and must not build or use updater secrets'
+    )
   }
 }
 

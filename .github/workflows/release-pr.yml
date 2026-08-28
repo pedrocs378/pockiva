@@ -56,6 +56,7 @@ jobs:
           node-version-file: trusted/.tool-versions
 
       - name: Validate versions and published tags
+        id: release-decision
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -91,16 +92,217 @@ jobs:
           if [[ "$decision_kind" == "valid" ]]; then
             decision_tag="$(jq -er '.tag' <<< "$decision")"
             assert_tag_available "$decision_tag"
+            echo "kind=valid" >> "$GITHUB_OUTPUT"
             echo "Release candidate $decision_tag is valid and has no published tag collision."
             exit 0
           fi
 
           if [[ "$decision_kind" == "patch-required" ]]; then
+            next_version="$(jq -er '.nextVersion' <<< "$decision")"
             next_tag="$(jq -er '.nextTag' <<< "$decision")"
             assert_tag_available "$next_tag"
-            echo "::error::Release candidate version equals main; PED-86 will replace this failure with a protected patch pull request for $next_tag." >&2
-            exit 1
+            echo "kind=patch-required" >> "$GITHUB_OUTPUT"
+            echo "next_version=$next_version" >> "$GITHUB_OUTPUT"
+            echo "next_tag=$next_tag" >> "$GITHUB_OUTPUT"
+            echo "Release candidate equals main; preparing the protected patch pull request for $next_tag."
+            exit 0
           fi
 
           echo "::error::Trusted classifier returned unsupported decision kind: $decision_kind." >&2
           exit 1
+
+      - name: Revalidate live release pull request
+        if: steps.release-decision.outputs.kind == 'patch-required'
+        env:
+          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          live_pr="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR_NUMBER")"
+          if ! jq -e \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg head_sha "$EVENT_HEAD_SHA" \
+            '.state == "open" and
+             .base.ref == "main" and
+             .head.ref == "develop" and
+             .head.repo.full_name == $repository and
+             .head.sha == $head_sha' \
+            <<< "$live_pr" >/dev/null
+          then
+            echo "::error::Live release pull request no longer matches the open same-repository develop-to-main event." >&2
+            exit 1
+          fi
+
+      - name: Mint repository-scoped release App token
+        id: release-app-token
+        if: steps.release-decision.outputs.kind == 'patch-required'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.POCKIVA_RELEASE_APP_ID }}
+          private-key: ${{ secrets.POCKIVA_RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: pockiva
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Create or reuse protected patch pull request
+        if: steps.release-decision.outputs.kind == 'patch-required'
+        env:
+          AUTOMATION_BRANCH: automation/release-pr-${{ github.event.pull_request.number }}-patch
+          EXPECTED_VERSION: ${{ steps.release-decision.outputs.next_version }}
+          GH_TOKEN: ${{ steps.release-app-token.outputs.token }}
+          RELEASE_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RELEASE_PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          block_release_until_patch_merges() {
+            local pull_request_url="$1"
+            echo "::error::Patch pull request $pull_request_url must merge into develop before this release candidate can pass." >&2
+            exit 1
+          }
+
+          expected_paths="$(printf '%s\n' \
+            Cargo.lock \
+            Cargo.toml \
+            apps/desktop/package.json \
+            apps/desktop/src-tauri/tauri.conf.json)"
+
+          candidate_head="$(git -C candidate rev-parse HEAD)"
+          if [[ "$candidate_head" != "$RELEASE_HEAD_SHA" ]]; then
+            echo "::error::Candidate checkout $candidate_head does not match release head $RELEASE_HEAD_SHA." >&2
+            exit 1
+          fi
+          if [[ -n "$(git -C candidate status --short)" ]]; then
+            echo "::error::Candidate checkout must be clean before the trusted patch bump runs." >&2
+            exit 1
+          fi
+
+          bumped_version="$(node trusted/scripts/version-bump.mjs patch \
+            --root "$GITHUB_WORKSPACE/candidate" \
+            --print-version)"
+          if [[ "$bumped_version" != "$EXPECTED_VERSION" ]]; then
+            echo "::error::Trusted bump produced $bumped_version; expected $EXPECTED_VERSION." >&2
+            exit 1
+          fi
+
+          actual_paths="$(git -C candidate diff --name-only | LC_ALL=C sort)"
+          if [[ "$actual_paths" != "$expected_paths" ]]; then
+            echo "::error::Trusted bump changed an unexpected file set." >&2
+            diff <(printf '%s\n' "$expected_paths") <(printf '%s\n' "$actual_paths") >&2 || true
+            exit 1
+          fi
+
+          while IFS= read -r path; do
+            git -C candidate add -- "$path"
+          done <<< "$expected_paths"
+          staged_paths="$(git -C candidate diff --cached --name-only | LC_ALL=C sort)"
+          if [[ "$staged_paths" != "$expected_paths" ]]; then
+            echo "::error::Staged patch differs from the approved version-file allowlist." >&2
+            exit 1
+          fi
+          expected_tree="$(git -C candidate write-tree)"
+
+          existing_prs="$(gh pr list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state all \
+            --base develop \
+            --head "$AUTOMATION_BRANCH" \
+            --limit 10 \
+            --json number,url,headRefName,headRefOid,baseRefName,state,mergedAt,closedAt)"
+          existing_pr_count="$(jq -er 'length' <<< "$existing_prs")"
+          if (( existing_pr_count > 1 )); then
+            echo "::error::Found inconsistent pull request history for $AUTOMATION_BRANCH." >&2
+            exit 1
+          fi
+          if (( existing_pr_count == 1 )) && ! jq -e \
+            '.[0].state == "OPEN" and .[0].mergedAt == null and .[0].closedAt == null' \
+            <<< "$existing_prs" >/dev/null
+          then
+            echo "::error::Previously closed or merged automation pull request blocks safe reuse of $AUTOMATION_BRANCH." >&2
+            exit 1
+          fi
+
+          branch_error="$(mktemp)"
+          if remote_branch="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$AUTOMATION_BRANCH" 2>"$branch_error")"; then
+            remote_branch_exists=true
+            remote_sha="$(jq -er '.object.sha' <<< "$remote_branch")"
+          elif grep -q 'HTTP 404' "$branch_error"; then
+            remote_branch_exists=false
+            remote_sha=''
+          else
+            cat "$branch_error" >&2
+            echo "::error::Unable to inspect remote automation branch $AUTOMATION_BRANCH." >&2
+            exit 1
+          fi
+          rm "$branch_error"
+
+          if [[ "$remote_branch_exists" == true ]]; then
+            if (( existing_pr_count != 1 )); then
+              echo "::error::Remote automation branch exists without its expected open pull request." >&2
+              exit 1
+            fi
+
+            existing_pr_number="$(jq -er '.[0].number' <<< "$existing_prs")"
+            existing_pr_url="$(jq -er '.[0].url' <<< "$existing_prs")"
+            existing_pr_head="$(jq -er '.[0].headRefOid' <<< "$existing_prs")"
+            existing_pr_head_name="$(jq -er '.[0].headRefName' <<< "$existing_prs")"
+            existing_pr_base_name="$(jq -er '.[0].baseRefName' <<< "$existing_prs")"
+            if [[ "$existing_pr_head" != "$remote_sha" || \
+                  "$existing_pr_head_name" != "$AUTOMATION_BRANCH" || \
+                  "$existing_pr_base_name" != "develop" ]]; then
+              echo "::error::Existing automation pull request does not match its expected branch and base." >&2
+              exit 1
+            fi
+
+            remote_commit="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$remote_sha")"
+            remote_parent="$(jq -er 'if (.parents | length) == 1 then .parents[0].sha else empty end' <<< "$remote_commit")"
+            remote_tree="$(jq -er '.tree.sha' <<< "$remote_commit")"
+            if [[ "$remote_parent" != "$RELEASE_HEAD_SHA" || "$remote_tree" != "$expected_tree" ]]; then
+              echo "::error::Existing automation branch is stale or contains unexpected changes." >&2
+              exit 1
+            fi
+
+            echo "Reusing protected patch pull request $existing_pr_url for Pockiva v$EXPECTED_VERSION."
+            gh pr merge "$existing_pr_number" \
+              --repo "$GITHUB_REPOSITORY" \
+              --auto \
+              --squash \
+              --delete-branch
+            block_release_until_patch_merges "$existing_pr_url"
+          fi
+
+          if (( existing_pr_count != 0 )); then
+            echo "::error::An open automation pull request exists without its remote branch." >&2
+            exit 1
+          fi
+
+          git -C candidate switch -c "$AUTOMATION_BRANCH"
+          git -C candidate config user.name 'pockiva-release-bot[bot]'
+          git -C candidate config user.email 'pockiva-release-bot[bot]@users.noreply.github.com'
+          git -C candidate commit -m "chore(release): bump Pockiva to v$EXPECTED_VERSION"
+
+          created_parent="$(git -C candidate rev-parse HEAD^)"
+          created_tree="$(git -C candidate rev-parse 'HEAD^{tree}')"
+          if [[ "$created_parent" != "$RELEASE_HEAD_SHA" || "$created_tree" != "$expected_tree" ]]; then
+            echo "::error::Generated automation commit does not match the trusted release head and expected tree." >&2
+            exit 1
+          fi
+
+          gh auth setup-git
+          git -C candidate push origin "HEAD:refs/heads/$AUTOMATION_BRANCH"
+
+          bot_pr_url="$(gh pr create \
+            --repo "$GITHUB_REPOSITORY" \
+            --base develop \
+            --head "$AUTOMATION_BRANCH" \
+            --title "[Release] Bump Pockiva to v$EXPECTED_VERSION for release PR #$RELEASE_PR_NUMBER" \
+            --body "Automatically applies the missing patch bump for release PR #$RELEASE_PR_NUMBER. This pull request must pass the complete develop CI before squash auto-merge.")"
+          echo "Created protected patch pull request $bot_pr_url for Pockiva v$EXPECTED_VERSION."
+          gh pr merge "$bot_pr_url" \
+            --repo "$GITHUB_REPOSITORY" \
+            --auto \
+            --squash \
+            --delete-branch
+          block_release_until_patch_merges "$bot_pr_url"
