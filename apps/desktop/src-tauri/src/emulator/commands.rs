@@ -64,8 +64,7 @@ pub(crate) fn subscribe_runtime_impl(
     frames: Channel<Response>,
     runtime: &DesktopRuntime,
 ) -> RuntimeResult<RuntimeSnapshot> {
-    runtime.subscribe(Arc::new(ChannelObserver::new(events, frames)))?;
-    runtime.snapshot()
+    runtime.subscribe(Arc::new(ChannelObserver::new(events, frames)))
 }
 
 #[tauri::command]

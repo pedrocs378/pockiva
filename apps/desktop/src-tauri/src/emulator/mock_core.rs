@@ -1,5 +1,6 @@
 //! Deterministic contract stand-in kept in production through PED-37.
 //! PED-39 alone replaces its registration with a real `GameBoy` and platform `SystemClock`.
+//! PED-40 owns battery-save loading, checkpoints, shutdown flushes, and corruption handling.
 
 use std::collections::HashMap;
 use std::num::NonZeroU32;

@@ -125,7 +125,7 @@ impl RuntimeModel {
 enum RuntimeCommand {
     Subscribe {
         observer: Arc<dyn RuntimeObserver>,
-        reply: SyncSender<RuntimeResult<()>>,
+        reply: SyncSender<RuntimeResult<RuntimeSnapshot>>,
     },
     AcknowledgeFrame {
         sequence: u64,
@@ -191,7 +191,7 @@ impl DesktopRuntime {
         self.request(|reply| RuntimeCommand::Snapshot { reply })
     }
 
-    pub fn subscribe(&self, observer: Arc<dyn RuntimeObserver>) -> RuntimeResult<()> {
+    pub fn subscribe(&self, observer: Arc<dyn RuntimeObserver>) -> RuntimeResult<RuntimeSnapshot> {
         self.request(|reply| RuntimeCommand::Subscribe { observer, reply })
     }
 
@@ -321,7 +321,7 @@ fn handle_command(
         } => {
             delivery.clear();
             *observer = Some(replacement);
-            let result = publish_control(model, observer);
+            let result = publish_control(model, observer).map(|()| model.snapshot());
             let _ = reply.send(result);
         }
         RuntimeCommand::AcknowledgeFrame { sequence, reply } => {
@@ -436,6 +436,7 @@ fn load_rom(
         |name| name.to_string_lossy().into_owned(),
     );
     let mut candidate = factory.create();
+    // PED-40 owns persisted battery loading and every save/flush path.
     match candidate.load_rom(&bytes, None) {
         Ok(metadata) => {
             model.finish_load(metadata, file_name);
@@ -943,6 +944,24 @@ mod tests {
         assert_eq!(runtime.test_only_buffered_frame_count(), 0);
         runtime.shutdown().expect("shutdown");
         fs::remove_file(path).expect("remove exact synthetic ROM");
+    }
+
+    #[test]
+    fn frame_backpressure_subscription_returns_the_published_snapshot() {
+        let observer = RecordingObserver::default();
+        let runtime = DesktopRuntime::spawn(Arc::new(ContractMockCoreFactory));
+
+        let snapshot = runtime
+            .subscribe(Arc::new(observer.clone()))
+            .expect("subscribe");
+
+        assert_eq!(snapshot, RuntimeSnapshot::empty());
+        let events = observer.control.lock().expect("control events");
+        assert!(matches!(
+            events.as_slice(),
+            [RuntimeEvent::Snapshot { snapshot }] if snapshot == &RuntimeSnapshot::empty()
+        ));
+        runtime.shutdown().expect("shutdown");
     }
 
     #[test]
