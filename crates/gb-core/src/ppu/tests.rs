@@ -25,7 +25,8 @@ fn set_tile_row(ppu: &mut Ppu, tile: u8, row: u8, colors: [u8; 8]) {
 fn add_sprite(ppu: &mut Ppu, index: u8, raw_y: u8, raw_x: u8, tile: u8, flags: u8) {
     let base = 0xfe00 + u16::from(index) * 4;
     for (offset, value) in [raw_y, raw_x, tile, flags].into_iter().enumerate() {
-        ppu.write(base + offset as u16, value);
+        let offset = u16::try_from(offset).expect("sprite field offset fits in u16");
+        ppu.write(base + offset, value);
     }
 }
 
