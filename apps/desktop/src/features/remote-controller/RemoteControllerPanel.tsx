@@ -5,7 +5,7 @@ import { QRCodeSVG } from 'qrcode.react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
 import { type RemoteSessionClient, tauriRemoteSessionClient } from './remote-client'
 import type { RemoteErrorCode, RemoteSnapshot } from './remote-types'
 import { useRemoteSession } from './use-remote-session'
@@ -49,17 +49,17 @@ export const RemoteControllerPanel = ({ client = tauriRemoteSessionClient }: Rem
   }, [waitingExpiry])
 
   return (
-    <Card className="remote-controller-panel" aria-labelledby="remote-controller-title">
+    <Card className="remote-controller-panel" role="region" aria-labelledby="remote-controller-title">
       <CardHeader className="remote-controller-header">
         <div>
           <p className="eyebrow">Remote play</p>
-          <CardTitle id="remote-controller-title" aria-live="polite">
+          <h2 id="remote-controller-title" className="remote-controller-title" aria-live="polite">
             {snapshot.phase === 'off' && 'Mobile controller is off'}
             {snapshot.phase === 'waiting' && !expired && 'Scan to connect'}
             {snapshot.phase === 'connected' && !expired && 'Mobile controller connected'}
             {expired && 'Pairing link expired'}
             {snapshot.phase === 'error' && 'Mobile controller unavailable'}
-          </CardTitle>
+          </h2>
         </div>
         <Badge variant="outline">Protocol {PROTOCOL_VERSION}</Badge>
       </CardHeader>
@@ -85,12 +85,15 @@ export const RemoteControllerPanel = ({ client = tauriRemoteSessionClient }: Rem
             </div>
             <div className="remote-pairing-details">
               <p>Scan this code with a phone connected to the same local network.</p>
-              <input
+              <textarea
                 aria-label="Pairing URL"
+                autoComplete="off"
                 className="remote-pairing-url"
                 readOnly
+                rows={3}
                 spellCheck={false}
                 value={snapshot.pairingUrl}
+                wrap="soft"
               />
               <p>Pairing expires at {formatExpiry(snapshot.expiresAtUnixMs)}.</p>
             </div>

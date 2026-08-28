@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -6,8 +8,10 @@ import type { RuntimeErrorCode, RuntimeSnapshot } from '@/features/emulator/runt
 import { defaultKeyboardMapping } from '@/features/keyboard/keyboard-mapping'
 import { KeyboardMappingRepository } from '@/features/keyboard/keyboard-mapping-store'
 import type { RemoteSessionClient } from '@/features/remote-controller/remote-client'
-import type { RemoteSnapshot } from '@/features/remote-controller/remote-types'
+import type { RemoteErrorCode, RemoteSnapshot } from '@/features/remote-controller/remote-types'
 import { EmulatorPage } from './EmulatorPage'
+
+const desktopStyles = readFileSync(resolve(process.cwd(), 'src/styles.css'), 'utf8')
 
 const emptySnapshot: RuntimeSnapshot = { phase: 'empty', rom: null, error: null }
 const pausedSnapshot: RuntimeSnapshot = {
@@ -59,9 +63,9 @@ const createRepository = (value = defaultKeyboardMapping) =>
     save: vi.fn().mockResolvedValue(undefined)
   })
 
-const createRemoteClient = (): RemoteSessionClient => ({
-  subscribe: vi.fn().mockResolvedValue(remoteOffSnapshot),
-  snapshot: vi.fn().mockResolvedValue(remoteOffSnapshot),
+const createRemoteClient = (initial: RemoteSnapshot = remoteOffSnapshot): RemoteSessionClient => ({
+  subscribe: vi.fn().mockResolvedValue(initial),
+  snapshot: vi.fn().mockResolvedValue(initial),
   start: vi.fn().mockResolvedValue(remoteOffSnapshot),
   end: vi.fn().mockResolvedValue(remoteOffSnapshot)
 })
@@ -110,6 +114,36 @@ describe('EmulatorPage lifecycle', () => {
     expect(runtimeClient.openRom).not.toHaveBeenCalled()
     expect(runtimeClient.start).not.toHaveBeenCalled()
   })
+
+  it.each([
+    ['no-lan-address', 'No local network address was found'],
+    ['bind-failed', 'The controller server could not start'],
+    ['assets-unavailable', 'The mobile controller files are unavailable'],
+    ['server-failed', 'The controller session stopped'],
+    ['runtime-unavailable', 'The emulator runtime is unavailable'],
+    ['invalid-lifecycle', 'The controller session is busy']
+  ] satisfies Array<[RemoteErrorCode, string]>)(
+    'keeps ROM actions available during remote error %s',
+    async (code, heading) => {
+      const runtimeClient = createClient()
+      vi.mocked(runtimeClient.subscribe).mockResolvedValueOnce(pausedSnapshot)
+      const remoteError: RemoteSnapshot = {
+        phase: 'error',
+        pairingUrl: null,
+        expiresAtUnixMs: null,
+        controllerId: null,
+        latency: null,
+        error: { code, message: 'Detailed remote failure.' }
+      }
+
+      renderPage(runtimeClient, createRepository(), createRemoteClient(remoteError))
+
+      expect(await screen.findByText(heading)).toBeVisible()
+      for (const name of ['Open ROM', 'Start', 'Restart', 'Close ROM', 'Keyboard controls']) {
+        expect(screen.getByRole('button', { name })).toBeEnabled()
+      }
+    }
+  )
 
   it('opens, starts, and closes a ROM with explicit enablement', async () => {
     const user = userEvent.setup()
@@ -222,5 +256,11 @@ describe('EmulatorPage lifecycle', () => {
     renderPage(createClient(), repository)
 
     expect(await screen.findByText('Controls could not be loaded. Default keys are active.')).toBeVisible()
+  })
+
+  it('collapses the remote controller layout at the 640px breakpoint', () => {
+    expect(desktopStyles).toMatch(
+      /@media\s*\(max-width:\s*40rem\)[\s\S]*?\.remote-controller-actions\s*\{[\s\S]*?flex-direction:\s*column;/
+    )
   })
 })

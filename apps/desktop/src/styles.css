@@ -185,6 +185,13 @@ h1 {
   gap: 1rem;
 }
 
+.remote-controller-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
 .remote-controller-content,
 .remote-controller-summary,
 .remote-pairing-details {
@@ -237,8 +244,11 @@ h1 {
 .remote-pairing-url {
   width: 100%;
   min-width: 0;
+  resize: none;
   padding: 0.65rem 0.75rem;
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-all;
   border: 1px solid var(--border);
   border-radius: 0.5rem;
   color: var(--foreground);
@@ -278,7 +288,7 @@ h1 {
   opacity: 0.55;
 }
 
-@media (max-width: 36rem) {
+@media (max-width: 40rem) {
   .desktop-shell {
     padding: 1rem;
   }

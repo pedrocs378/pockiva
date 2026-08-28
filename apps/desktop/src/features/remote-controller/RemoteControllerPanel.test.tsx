@@ -66,7 +66,8 @@ describe('RemoteControllerPanel', () => {
     const client = createClient(offSnapshot)
     render(<RemoteControllerPanel client={client} />)
 
-    expect(await screen.findByText('Mobile controller is off')).toBeVisible()
+    expect(await screen.findByRole('heading', { level: 2, name: 'Mobile controller is off' })).toBeVisible()
+    expect(screen.getByRole('region', { name: 'Mobile controller is off' })).toBeVisible()
     expect(screen.queryByTestId('pairing-qr')).not.toBeInTheDocument()
     expect(screen.queryByText(/token=/)).not.toBeInTheDocument()
 
@@ -80,7 +81,13 @@ describe('RemoteControllerPanel', () => {
 
     expect(await screen.findByText('Scan to connect')).toBeVisible()
     expect(screen.getByTestId('pairing-qr')).toHaveAttribute('data-value', waitingSnapshot.pairingUrl)
-    expect(screen.getByRole('textbox', { name: 'Pairing URL' })).toHaveValue(waitingSnapshot.pairingUrl)
+    const pairingUrl = screen.getByRole('textbox', { name: 'Pairing URL' })
+    expect(pairingUrl).toHaveValue(waitingSnapshot.pairingUrl)
+    expect(pairingUrl.tagName).toBe('TEXTAREA')
+    expect(pairingUrl).toHaveAttribute('wrap', 'soft')
+    ;(pairingUrl as HTMLTextAreaElement).select()
+    expect((pairingUrl as HTMLTextAreaElement).selectionStart).toBe(0)
+    expect((pairingUrl as HTMLTextAreaElement).selectionEnd).toBe(waitingSnapshot.pairingUrl.length)
     expect(screen.getByText(/Pairing expires/)).toBeVisible()
     expect(screen.getByRole('button', { name: 'End session' })).toBeEnabled()
     expect(qrMock).toHaveBeenCalledWith(
