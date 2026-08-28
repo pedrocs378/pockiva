@@ -1,9 +1,15 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { PROTOCOL_VERSION } from '@gameboy/protocol'
 import { IconWifi, IconWifiOff } from '@tabler/icons-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ControllerButton } from '@/features/controller/ControllerButton'
+import { DirectionalControl } from '@/features/controller/DirectionalControl'
+import {
+  browserDirectionalModeRepository,
+  type DirectionalMode,
+  type DirectionalModeRepository
+} from '@/features/controller/directional-mode'
 import { useControllerInput } from '@/features/controller/use-controller-input'
 import { parsePairingUrl } from '@/features/session/pairing'
 import { createWebSocketTransport, type SessionTransport } from '@/features/session/transport'
@@ -35,9 +41,15 @@ const STATUS_HELP = {
 export type ControllerPageProps = {
   pairingUrl?: URL
   transport?: SessionTransport
+  directionalModeRepository?: DirectionalModeRepository
 }
 
-export const ControllerPage = ({ pairingUrl, transport }: ControllerPageProps) => {
+export const ControllerPage = ({
+  pairingUrl,
+  transport,
+  directionalModeRepository = browserDirectionalModeRepository
+}: ControllerPageProps) => {
+  const [directionalMode, setDirectionalMode] = useState(() => directionalModeRepository.load())
   const pairing = useMemo(() => parsePairingUrl(pairingUrl ?? new URL(window.location.href)), [pairingUrl])
   const resolvedTransport = useMemo(() => transport ?? createWebSocketTransport(), [transport])
   const controller = useControllerSession(pairing, resolvedTransport)
@@ -48,11 +60,16 @@ export const ControllerPage = ({ pairingUrl, transport }: ControllerPageProps) =
     controller.disconnect()
     input.releaseAll()
   }
+  const changeDirectionalMode = (mode: DirectionalMode) => {
+    input.releaseButtons(D_PAD_BUTTONS)
+    directionalModeRepository.save(mode)
+    setDirectionalMode(mode)
+  }
 
   return (
     <main className="controller-shell">
       <header className="controller-header">
-        <div>
+        <div className="controller-title">
           <p>Remote input</p>
           <h1>Game Boy Controller</h1>
         </div>
@@ -83,21 +100,15 @@ export const ControllerPage = ({ pairingUrl, transport }: ControllerPageProps) =
       </header>
 
       <section className="controls" aria-label="Game Boy controls">
-        <fieldset className="d-pad">
-          <legend className="sr-only">Directional controls</legend>
-          {D_PAD_BUTTONS.map((button) => (
-            <ControllerButton
-              key={button}
-              button={button}
-              label={BUTTON_LABELS[button]}
-              className={`control-button direction ${button}`}
-              pressed={input.pressedButtons.has(button)}
-              disabled={controlsDisabled}
-              onPress={input.pressPointer}
-              onRelease={input.releasePointer}
-            />
-          ))}
-        </fieldset>
+        <DirectionalControl
+          mode={directionalMode}
+          disabled={controlsDisabled}
+          pressedButtons={input.pressedButtons}
+          onModeChange={changeDirectionalMode}
+          pressPointer={input.pressPointer}
+          setPointerButtons={input.setPointerButtons}
+          releasePointer={input.releasePointer}
+        />
 
         <div className="menu-controls">
           {MENU_BUTTONS.map((button) => (
