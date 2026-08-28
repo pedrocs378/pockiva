@@ -5,7 +5,7 @@ export class Storage {
 
   read(key: string): unknown {
     const value = this.backend.getItem(key)
-    if (value === null) return null
+    if (value === null) return undefined
 
     try {
       return JSON.parse(value)

@@ -13,7 +13,7 @@ export class DirectionalModeRepository {
   load(): DirectionalMode {
     try {
       const value = this.storage.read(SETTINGS_KEY)
-      if (value === null) return defaultDirectionalMode
+      if (value === undefined) return defaultDirectionalMode
 
       const parsed = directionalModeSchema.safeParse(value)
       if (parsed.success) return parsed.data

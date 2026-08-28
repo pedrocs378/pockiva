@@ -9,7 +9,15 @@ const backend = (value: string | null = null) => ({
 
 describe('DirectionalModeRepository', () => {
   it('uses d-pad when no preference exists', () => {
-    expect(new DirectionalModeRepository(new Storage(backend())).load()).toBe('d-pad')
+    const raw = backend()
+    expect(new DirectionalModeRepository(new Storage(raw)).load()).toBe('d-pad')
+    expect(raw.setItem).not.toHaveBeenCalled()
+  })
+
+  it('repairs a persisted JSON null preference', () => {
+    const raw = backend('null')
+    expect(new DirectionalModeRepository(new Storage(raw)).load()).toBe('d-pad')
+    expect(raw.setItem).toHaveBeenCalledWith('directionalModeV1', '"d-pad"')
   })
 
   it('restores a valid joystick preference', () => {
