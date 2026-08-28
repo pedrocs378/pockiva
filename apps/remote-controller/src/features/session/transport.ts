@@ -23,9 +23,7 @@ type BrowserSocket = {
 
 export type WebSocketConstructor = new (url: string) => BrowserSocket
 
-export const createWebSocketTransport = (
-  WebSocketImpl: WebSocketConstructor = WebSocket
-): SessionTransport => ({
+export const createWebSocketTransport = (WebSocketImpl: WebSocketConstructor = WebSocket): SessionTransport => ({
   connect: (url, handlers) => {
     const socket = new WebSocketImpl(url)
     const onOpen: EventListener = () => handlers.onOpen()

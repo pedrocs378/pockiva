@@ -3,9 +3,7 @@ export type PairingConfig = {
   socketUrl: string
 }
 
-export type PairingResult =
-  | { status: 'ready'; config: PairingConfig }
-  | { status: 'missing-token' | 'invalid-url' }
+export type PairingResult = { status: 'ready'; config: PairingConfig } | { status: 'missing-token' | 'invalid-url' }
 
 export const parsePairingUrl = (url: URL): PairingResult => {
   const token = url.searchParams.get('token')?.trim()
