@@ -15,7 +15,7 @@ The crate contains no Tauri, React, filesystem, network, Tokio, or platform-audi
 - The LR35902 CPU accesses memory only through `CpuBus`. Every CPU read, write, or idle machine cycle advances the machine bus by four T-cycles.
 - `MachineBus: Send` owns `Mapper: Send`, `VideoDevice: Send`, and `AudioDevice: Send` trait objects. It fans every machine cycle into timer, DMA, video, and audio, then unions device interrupt requests into IF.
 - The video device owns VRAM, OAM, and `FF40..=FF4B`. PED-36's `Ppu: VideoDevice + Send` advances one LCD T-cycle at a time behind each four-T-cycle machine-bus call and publishes fixed `160 x 144` RGBA8 frames through the existing `frame_ready`/`take_frame` contract.
-- The audio device owns `FF10..=FF3F`; the PED-35 implementation stores registers and drains an empty batch at the configured non-zero rate. PED-49 owns PCM synthesis behind this seam.
+- The audio device owns `FF10..=FF3F`. PED-49's `Apu: AudioDevice + Send` implements the two pulse channels, programmable wave channel, noise channel, frame sequencer, mixer, high-pass filtering, and bounded stereo PCM at the configured non-zero rate. The bus forwards every machine cycle as four individual APU T-cycles and mirrors `FF04` divider resets so frame-sequencer falling edges remain deterministic.
 - OAM DMA copies one byte per machine cycle for 160 cycles, permits HRAM CPU access, blocks other CPU accesses, and can be restarted by writing `FF46`.
 - Timer input uses divider falling edges at TAC-selected bits `9, 3, 5, 7`; overflow exposes `00` for four T-cycles before reload and requests the timer interrupt.
 - IF/IE retain only bits `0..=4`; pending interrupts use DMG priority order and service vectors `0040`, `0048`, `0050`, `0058`, `0060`.
@@ -35,6 +35,12 @@ The PPU models 456 T-cycles per line and 154 lines per frame, with 144 visible l
 CPU VRAM access is blocked during Drawing, and CPU OAM access is blocked during OAM scan and Drawing; OAM DMA writes use the dedicated device path. Rendering covers DMG background scrolling and tile addressing, the `WX-7` window origin and window-line counter, and at most ten objects per scanline. Objects support 8x8/8x16 selection, flips, transparent color zero, OBP0/OBP1 selection, background priority, and DMG priority by X coordinate then OAM index. BGP/OBP color numbers map to a neutral white, light gray, dark gray, and black RGBA palette.
 
 The core keeps one pending frame: publishing a newer frame replaces an unread one. Dual-mode cartridge headers are reported as `DmgCompatible` and execute with this DMG renderer. CGB-only cartridges are rejected, and CGB rendering remains unsupported.
+
+## DMG audio behavior
+
+The APU starts from the post-boot DMG divider value `ABCC` and clocks its frame sequencer from falling edges of divider bit 12, including edges caused by `FF04` writes. Register power behavior, length counters, envelopes, channel-one sweep, pulse duty/frequency, wave RAM access/retrigger, noise LFSR modes, NR50/NR51 mixing, VIN-ignore policy, DAC-off silence, and high-pass reset behavior are covered by deterministic unit and integration vectors.
+
+PCM sample counts use an integer phase accumulator against `DMG_CLOCK_HZ`; output is stereo-pair safe, bounded, and drained through the unchanged `AudioBatch` contract. The platform-independent crate contains no CPAL, ring buffer, OS audio, Tauri, or async-runtime dependency.
 
 ## Desktop frame boundary
 

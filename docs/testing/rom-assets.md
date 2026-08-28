@@ -25,3 +25,9 @@ The PPU acceptance manifest is `crates/gb-core/tests/ppu/roms.toml`. It pins twe
 `crates/gb-core/tests/ppu/fetch-roms.sh` is the only acquisition path. It requires interactive `yes` or the exact `GB_PPU_ROM_ASSET_ACCEPT=mooneye-mit-31510e1+dmg-acid2-mit-v1.0` acknowledgement, verifies the pinned archive and ROM before installation, and extracts only the twelve named Mooneye files. Ordinary install, build, test discovery, test execution, verification, and application startup perform no automatic download. The verifier is offline.
 
 Downloaded ROM binaries live under `crates/gb-core/tests/ppu/downloads/` and are ignored by the repository-wide `*.gb` rule. The official dmg-acid2 reference PNG is provenance only: it is not downloaded, stored, committed, decoded, or used as a runtime/test payload. The automated check compares raw RGBA bytes, so neither PNG nor base64 enters the frame transport. No commercial ROM was used.
+
+## PED-49 APU acceptance asset
+
+The local-only APU manifest is `crates/gb-core/tests/apu/rom_assets.toml`. It pins Blargg's `dmg_sound` suite from mirror revision `c240dd7d700e5c0b00a7bbba52b53e4ee67b5f15`, expected SHA-256 `c34e740664eb14b42c39750434e3e105fc92d774a98fb671594a48e972401630`, the `A000..A004` memory signal, and a 2,000,000,000 T-cycle bound. The mirror does not grant redistribution, so the repository provides no fetch path and the ignored harness runs only after a developer supplies the exact checksum-matched file at `tests/roms/downloads/blargg/dmg_sound/dmg_sound.gb`.
+
+Ordinary tests compile and discover the ignored harness without reading the asset. At the current PED-49 checkpoint the file is absent, so the compatibility-ROM gate is explicitly blocked; no ROM was downloaded or committed.
