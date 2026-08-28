@@ -45,15 +45,15 @@ Follow `docs/superpowers/plans/2026-08-27-ped-34-foundation.md` task-by-task wit
 Run:
 
 ```bash
-pnpm install --frozen-lockfile
-pnpm lint
-pnpm typecheck
-pnpm test
-pnpm build
-cargo fmt --all --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-features
-cargo check -p gb-core --no-default-features
+rtk pnpm install --frozen-lockfile
+rtk pnpm lint
+rtk pnpm typecheck
+rtk pnpm test
+rtk pnpm build
+rtk cargo fmt --all --check
+rtk cargo clippy --workspace --all-targets --all-features -- -D warnings
+rtk cargo test --workspace --all-features
+rtk cargo check -p gb-core --no-default-features
 ```
 
 Expected: every command exits `0`; `gb-core` builds without Tauri; both web applications build; protocol fixtures pass in TypeScript and Rust.
@@ -65,10 +65,11 @@ Move PED-34 to `In Review` before review. Move it to `Done` only after review fi
 ### Task 2: Run Phase 1 with three exclusive owners
 
 **Files:**
-- Core owner: `crates/gb-core/**`, `tests/roms/**`, `docs/compatibility/core.md`.
+- Core owner: `crates/gb-core/**`, `tests/roms/**`, `scripts/fetch-core-test-roms.sh`, `scripts/verify-core-test-roms.sh`, `.gitignore` only for the ROM-download exclusion, `docs/compatibility/core.md`, `docs/architecture/core-contracts.md`, and `docs/testing/rom-assets.md`.
 - Desktop owner: `apps/desktop/**` except `apps/desktop/src-tauri/src/remote/**` and shared Cargo manifests.
 - Mobile owner: `apps/remote-controller/**`.
 - Contract changes: `packages/protocol/**`, public modules in `crates/gb-core/src/contracts/**`, and workspace manifests require coordinator approval.
+- Shared lockfiles: the coordinator owns `Cargo.lock`; lane agents may update their own manifests but must not stage or commit `Cargo.lock`. PED-37 owns `pnpm-lock.yaml` in Phase 1 because it is the only lane allowed to add JavaScript dependencies.
 
 **Interfaces:**
 - Consumes: frozen PED-34 protocol and core/runtime contracts.
@@ -88,11 +89,15 @@ Each plan must pass the writing-plans self-review before dispatch.
 
 - [ ] **Step 2: Re-fetch blockers and start only unblocked issues**
 
-Use Linear immediately before dispatch. Move PED-35, PED-37, and PED-38 to `In Progress` only if PED-34 is `Done` and their blocker lists are empty.
+Use Linear immediately before dispatch. Move PED-35, PED-37, and PED-38 to `In Progress` only if PED-34 is `Done` and their blocker lists are empty. Before starting PED-35, also run the ROM-asset preflight from its plan. If either local-only Blargg ROM is absent, report that external acceptance dependency to the user immediately; implementation may proceed, but PED-35 must remain `In Progress` and no dependent lane may start until the checksum-matched files are supplied and both ignored Blargg tests pass.
 
 - [ ] **Step 3: Dispatch three agents with exclusive ownership**
 
 Assign one agent to each issue. No agent may edit another owner's paths. Shared-contract requests are sent to the coordinator and applied serially after compatibility review.
+
+- [ ] **Step 3a: Reconcile the shared Rust lockfile serially**
+
+After PED-35 and PED-37 have both finished their manifest edits, pause their Rust verification gates. With both manifests present, the coordinator updates `Cargo.lock` once, reviews the complete resolution, runs `rtk cargo check --workspace --all-targets --all-features`, and commits only `Cargo.lock`. The lane agents then resume focused Rust checks; neither lane stages the shared lockfile.
 
 - [ ] **Step 4: Review, verify, and synchronize each issue independently**
 
@@ -103,7 +108,7 @@ For each issue, run its plan's focused checks plus the complete workspace checks
 **Files:**
 - PED-36 owner: `crates/gb-core/src/ppu/**`, `crates/gb-core/tests/ppu/**`, `apps/desktop/src-tauri/src/video/**`, `apps/desktop/src/features/emulator/video/**`.
 - PED-49 owner: `crates/gb-core/src/apu/**`, `crates/gb-core/tests/apu/**`, `apps/desktop/src-tauri/src/audio/**`.
-- Shared timing/bus files require coordinator-owned serial integration.
+- Shared timing/bus files and `apps/desktop/src-tauri/src/emulator/runtime.rs` require coordinator-owned serial integration. PED-49 supplies the tested PCM/pacing adapter; the coordinator performs and commits the runtime hookup after PED-49's isolated implementation is stable and before PED-39 starts.
 
 **Interfaces:**
 - Consumes: completed PED-35 machine-cycle, bus, interrupt, framebuffer, and audio contracts.
@@ -122,9 +127,13 @@ The plans must name every shared timing/bus change. If both require the same fil
 
 - [ ] **Step 2: Re-fetch blockers and dispatch the independent modules**
 
-Start PED-36 and PED-49 only after PED-35 is `Done`. Move both to `In Progress`, dispatch separate owners, and retain coordinator ownership of shared core integration.
+Start PED-36 and PED-49 only after PED-35 and PED-37 are both `Done`. Move both to `In Progress`, dispatch separate owners, and retain coordinator ownership of shared core and desktop-runtime integration.
 
-- [ ] **Step 3: Verify and synchronize both lanes**
+- [ ] **Step 3: Integrate shared timing and runtime files serially**
+
+After the isolated PED-36 and PED-49 modules are stable, pause both owners. The coordinator integrates their named shared bus/timing changes and hooks PED-49's tested audio adapter into `apps/desktop/src-tauri/src/emulator/runtime.rs`, then runs the focused core, video, audio, and desktop runtime tests. Finish this serial commit before PED-39 receives runtime ownership.
+
+- [ ] **Step 4: Verify and synchronize both lanes**
 
 Require graphical test ROM evidence for PED-36 and audio register/timing evidence for PED-49. Run the full workspace suite after merging both lanes, then move each through `In Review` to `Done` independently.
 
@@ -133,13 +142,16 @@ Require graphical test ROM evidence for PED-36 and audio register/timing evidenc
 **Files:**
 - Modify: `crates/gb-network/**`.
 - Modify: `apps/desktop/src-tauri/src/remote/**`.
+- Create: `apps/desktop/src-tauri/src/emulator/factory.rs` by extracting the production factory boundary from PED-37's `emulator/runtime.rs` without changing the runtime-facing `CoreFactory` contract.
+- Modify: `apps/desktop/src-tauri/src/emulator/runtime.rs` only where the production core factory and remote input source are connected.
+- Modify: `apps/desktop/src-tauri/src/lib.rs` to register the production `SystemClock` + `GameBoy` factory.
 - Modify: `apps/desktop/src/features/remote-controller/**`.
 - Modify: `apps/remote-controller/src/features/session/**` only for integration corrections.
 - Modify: `packages/protocol/**` only through a version-compatible coordinator change.
 
 **Interfaces:**
-- Consumes: PED-35 input source contract, PED-37 desktop lifecycle, PED-38 protocol client.
-- Produces: authenticated local HTTP/WebSocket session, QR pairing, source-aware remote input, heartbeat cleanup, and reconnect behavior.
+- Consumes: PED-35 concrete `GameBoy` and input source contract, PED-37 injectable desktop lifecycle, PED-38 protocol client.
+- Produces: production `SystemClock` + `GameBoy` factory replacing the desktop mock, authenticated local HTTP/WebSocket session, QR pairing, source-aware remote input, heartbeat cleanup, and reconnect behavior.
 
 - [ ] **Step 1: Create the PED-39 executable plan**
 
@@ -151,7 +163,7 @@ PED-35, PED-37, and PED-38 must all be `Done`. Move PED-39 to `In Progress` only
 
 - [ ] **Step 3: Execute, review, and synchronize PED-39**
 
-Verify one active mobile client, second-client rejection, invalid/expired token rejection, button down/up, multi-button state, heartbeat timeout, unexpected disconnect cleanup, keyboard coexistence, and ROM continuity. Move through `In Review` to `Done` only after all checks pass.
+Verify that production startup constructs the real `GameBoy` rather than `ContractMockCore`, then verify a real supported ROM reaches core execution, one active mobile client, second-client rejection, invalid/expired token rejection, button down/up, multi-button state, heartbeat timeout, unexpected disconnect cleanup, keyboard coexistence, and ROM continuity. Move through `In Review` to `Done` only after all checks pass.
 
 ### Task 5: Consolidate and validate through PED-40
 
@@ -162,15 +174,18 @@ Verify one active mobile client, second-client rejection, invalid/expired token 
 - Create: `docs/known-limitations.md`.
 - Create: `docs/release/macos-apple-silicon.md`.
 - Create: `docs/release/windows-x64.md`.
+- Create: `apps/desktop/src-tauri/src/persistence/battery.rs`.
+- Create: `apps/desktop/src-tauri/src/persistence/mod.rs`.
+- Modify: `apps/desktop/src-tauri/src/emulator/runtime.rs` for persisted-state load, periodic dirty checkpoints, ROM replacement, close, and shutdown flushes.
 - Modify implementation files only for defects discovered by PED-40, with a regression test beside each fix.
 
 **Interfaces:**
 - Consumes: all completed core, PPU, APU, desktop, mobile, and integration work.
-- Produces: verified MVP evidence and documented compatibility/platform limitations.
+- Produces: cross-platform atomic battery-save persistence, verified MVP evidence, and documented compatibility/platform limitations.
 
 - [ ] **Step 1: Create the PED-40 executable validation plan**
 
-Create `docs/superpowers/plans/2026-08-27-ped-40-validation.md` with the exact ROM asset revisions, expected test signatures, manual scenarios, duration of the prolonged run, and platform build commands.
+Create `docs/superpowers/plans/2026-08-27-ped-40-validation.md` with the exact ROM asset revisions, expected test signatures, manual scenarios, duration of the prolonged run, platform build commands, and a TDD task for battery saves keyed by ROM identity. The persistence task must cover loading `BatteryState` before execution, format/version validation, corrupt-file preservation, temporary-file + atomic replacement behavior on macOS and Windows, periodic dirty checkpoints, ROM replacement, close, and application shutdown.
 
 - [ ] **Step 2: Verify blockers and start PED-40**
 
@@ -178,7 +193,7 @@ PED-36, PED-37, PED-39, and PED-49 must be `Done`. Move PED-40 to `In Progress` 
 
 - [ ] **Step 3: Execute validation and repair regressions**
 
-Every code correction receives a failing regression test before implementation. Repeat the relevant ROM, workspace, lifecycle, and platform checks after each fix.
+Implement and verify battery persistence before compatibility validation. Every later code correction receives a failing regression test before implementation. Repeat the relevant ROM, workspace, lifecycle, save/reload, and platform checks after each fix.
 
 - [ ] **Step 4: Complete PED-40**
 
@@ -203,15 +218,15 @@ Confirm PED-34, PED-35, PED-36, PED-37, PED-38, PED-39, PED-40, and PED-49 are a
 Run:
 
 ```bash
-pnpm install --frozen-lockfile
-pnpm lint
-pnpm typecheck
-pnpm test
-pnpm build
-cargo fmt --all --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-features
-pnpm --filter @gameboy/desktop tauri build
+rtk pnpm install --frozen-lockfile
+rtk pnpm lint
+rtk pnpm typecheck
+rtk pnpm test
+rtk pnpm build
+rtk cargo fmt --all --check
+rtk cargo clippy --workspace --all-targets --all-features -- -D warnings
+rtk cargo test --workspace --all-features
+rtk pnpm --filter @gameboy/desktop tauri build
 ```
 
 Expected: all commands exit `0` on macOS Apple Silicon; the Windows x64 CI build and installer job are green for the same commit.
@@ -219,4 +234,3 @@ Expected: all commands exit `0` on macOS Apple Silicon; the Windows x64 CI build
 - [ ] **Step 3: Complete PED-32**
 
 Move PED-32 to `Done` only after Step 1 and Step 2 succeed and the final review has no release-blocking finding.
-
