@@ -13,8 +13,10 @@ crate-type = ["lib", "cdylib", "staticlib"]
 workspace = true
 
 [dependencies]
+cpal = { version = "=0.18.2", default-features = false }
 gb-core = { path = "../../../crates/gb-core" }
 gb-network = { path = "../../../crates/gb-network" }
+ringbuf = "=0.5.1"
 serde = { version = "1.0.229", features = ["derive"] }
 tauri = { version = "2.11.5", features = [] }
 tauri-plugin-dialog = "2.7.2"

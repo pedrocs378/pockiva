@@ -10,8 +10,10 @@ use emulator::mock_core::ContractMockCoreFactory;
 use emulator::runtime::DesktopRuntime;
 use tauri::Manager;
 
+mod audio;
 mod contracts;
 mod emulator;
+mod video;
 
 pub use contracts::{FoundationStatus, foundation_status};
 

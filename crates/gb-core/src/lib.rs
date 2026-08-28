@@ -1,11 +1,13 @@
 #![forbid(unsafe_code)]
 
+mod apu;
 mod bus;
 mod cartridge;
 mod cpu;
 mod interrupts;
 mod joypad;
 mod machine;
+mod ppu;
 mod timer;
 
 pub mod contracts;
