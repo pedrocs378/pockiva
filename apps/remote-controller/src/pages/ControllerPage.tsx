@@ -1,67 +1,137 @@
+import { useMemo } from 'react'
 import { PROTOCOL_VERSION } from '@gameboy/protocol'
-import { IconWifiOff } from '@tabler/icons-react'
+import { IconWifi, IconWifiOff } from '@tabler/icons-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { ControllerButton } from '@/features/controller/ControllerButton'
+import { useControllerInput } from '@/features/controller/use-controller-input'
+import { parsePairingUrl } from '@/features/session/pairing'
+import { createWebSocketTransport, type SessionTransport } from '@/features/session/transport'
+import { useControllerSession } from '@/features/session/use-controller-session'
+import { ACTION_BUTTONS, BUTTON_LABELS, D_PAD_BUTTONS, MENU_BUTTONS } from '@/constants/controller'
 
-const dPadButtons = ['Up', 'Left', 'Right', 'Down'] as const
-const actionButtons = ['B', 'A'] as const
-const menuButtons = ['Select', 'Start'] as const
+const STATUS_COPY = {
+  connecting: 'Connecting',
+  connected: 'Connected',
+  disconnected: 'Disconnected',
+  'missing-token': 'Pairing link required',
+  'expired-token': 'Pairing link expired',
+  'incompatible-protocol': 'Protocol mismatch',
+  'controller-in-use': 'Another controller is connected',
+  'server-unavailable': 'Server unavailable'
+} as const
 
-export const ControllerPage = () => (
-  <main className="controller-shell">
-    <header className="controller-header">
-      <div>
-        <p>Remote input</p>
-        <h1>Game Boy Controller</h1>
-      </div>
-      <Badge variant="outline" className="connection-state" role="status">
-        <IconWifiOff aria-hidden="true" size={18} />
-        Disconnected
-      </Badge>
-    </header>
+const STATUS_HELP = {
+  connecting: 'Establishing a local controller session…',
+  connected: 'Ready for touch input.',
+  disconnected: 'The controller is disconnected.',
+  'missing-token': 'Scan the QR Code shown by the desktop app.',
+  'expired-token': 'Start a new desktop session and scan its QR Code.',
+  'incompatible-protocol': 'Update the desktop and controller to the same version.',
+  'controller-in-use': 'Disconnect the active phone before trying again.',
+  'server-unavailable': 'Check that the desktop session is still running on this network.'
+} as const
 
-    <section className="controls" aria-label="Game Boy controls">
-      <fieldset className="d-pad">
-        <legend className="sr-only">Directional controls</legend>
-        {dPadButtons.map((label) => (
-          <Button
-            key={label}
-            type="button"
-            variant="unstyled"
-            size="auto"
-            className={`control-button direction ${label.toLowerCase()}`}
-            disabled
-          >
-            {label}
-          </Button>
-        ))}
-      </fieldset>
+export type ControllerPageProps = {
+  pairingUrl?: URL
+  transport?: SessionTransport
+}
 
-      <div className="menu-controls">
-        {menuButtons.map((label) => (
-          <Button key={label} type="button" variant="unstyled" size="auto" className="control-button menu" disabled>
-            {label}
-          </Button>
-        ))}
-      </div>
+export const ControllerPage = ({ pairingUrl, transport }: ControllerPageProps) => {
+  const pairing = useMemo(() => parsePairingUrl(pairingUrl ?? new URL(window.location.href)), [pairingUrl])
+  const resolvedTransport = useMemo(() => transport ?? createWebSocketTransport(), [transport])
+  const controller = useControllerSession(pairing, resolvedTransport)
+  const input = useControllerInput(controller.session)
+  const status = controller.snapshot.status
+  const controlsDisabled = status !== 'connected'
+  const disconnect = () => {
+    controller.disconnect()
+    input.releaseAll()
+  }
 
-      <fieldset className="action-controls">
-        <legend className="sr-only">Action controls</legend>
-        {actionButtons.map((label) => (
-          <Button
-            key={label}
-            type="button"
-            variant="unstyled"
-            size="auto"
-            className={`control-button action action-${label.toLowerCase()}`}
-            disabled
-          >
-            {label}
-          </Button>
-        ))}
-      </fieldset>
-    </section>
+  return (
+    <main className="controller-shell">
+      <header className="controller-header">
+        <div>
+          <p>Remote input</p>
+          <h1>Game Boy Controller</h1>
+        </div>
+        <div className="session-summary">
+          <Badge variant="outline" className="connection-state" role="status">
+            {status === 'connected' ? (
+              <IconWifi aria-hidden="true" size={18} />
+            ) : (
+              <IconWifiOff aria-hidden="true" size={18} />
+            )}
+            {STATUS_COPY[status]}
+          </Badge>
+          <p className="session-help">{STATUS_HELP[status]}</p>
+          {status === 'connected' || status === 'connecting' ? (
+            <Button type="button" variant="secondary" size="sm" onClick={disconnect}>
+              Disconnect
+            </Button>
+          ) : status === 'disconnected' ? (
+            <Button type="button" variant="secondary" size="sm" onClick={controller.connect}>
+              Connect
+            </Button>
+          ) : status === 'server-unavailable' ? (
+            <Button type="button" variant="secondary" size="sm" onClick={controller.connect}>
+              Retry
+            </Button>
+          ) : null}
+        </div>
+      </header>
 
-    <footer>Protocol {PROTOCOL_VERSION}</footer>
-  </main>
-)
+      <section className="controls" aria-label="Game Boy controls">
+        <fieldset className="d-pad">
+          <legend className="sr-only">Directional controls</legend>
+          {D_PAD_BUTTONS.map((button) => (
+            <ControllerButton
+              key={button}
+              button={button}
+              label={BUTTON_LABELS[button]}
+              className={`control-button direction ${button}`}
+              pressed={input.pressedButtons.has(button)}
+              disabled={controlsDisabled}
+              onPress={input.pressPointer}
+              onRelease={input.releasePointer}
+            />
+          ))}
+        </fieldset>
+
+        <div className="menu-controls">
+          {MENU_BUTTONS.map((button) => (
+            <ControllerButton
+              key={button}
+              button={button}
+              label={BUTTON_LABELS[button]}
+              className="control-button menu"
+              pressed={input.pressedButtons.has(button)}
+              disabled={controlsDisabled}
+              onPress={input.pressPointer}
+              onRelease={input.releasePointer}
+            />
+          ))}
+        </div>
+
+        <fieldset className="action-controls">
+          <legend className="sr-only">Action controls</legend>
+          {ACTION_BUTTONS.map((button) => (
+            <ControllerButton
+              key={button}
+              button={button}
+              label={BUTTON_LABELS[button]}
+              className={`control-button action action-${button}`}
+              pressed={input.pressedButtons.has(button)}
+              disabled={controlsDisabled}
+              onPress={input.pressPointer}
+              onRelease={input.releasePointer}
+            />
+          ))}
+        </fieldset>
+      </section>
+
+      <footer>Protocol {PROTOCOL_VERSION}</footer>
+    </main>
+  )
+}
