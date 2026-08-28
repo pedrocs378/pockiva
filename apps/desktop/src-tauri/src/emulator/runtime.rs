@@ -9,8 +9,9 @@ use gb_core::{Button, CartridgeMetadata, EmulatorCore, Frame, InputSourceId, Joy
 
 use super::contracts::{
     RomSummary, RuntimeButton, RuntimeError, RuntimeErrorCode, RuntimeEvent, RuntimePhase,
-    RuntimeResult, RuntimeSnapshot, encode_frame_packet,
+    RuntimeResult, RuntimeSnapshot,
 };
+use crate::video::{AcknowledgeError, FrameQueue, encode_frame_packet};
 
 const COMMAND_QUEUE_CAPACITY: usize = 32;
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -29,24 +30,6 @@ pub trait CoreFactory: Send + Sync {
 pub trait RuntimeObserver: Send + Sync {
     fn publish_control(&self, event: RuntimeEvent) -> RuntimeResult<()>;
     fn publish_frame(&self, packet: Vec<u8>) -> RuntimeResult<()>;
-}
-
-#[derive(Default)]
-struct FrameDelivery {
-    in_flight_sequence: Option<u64>,
-    latest_pending: Option<Frame>,
-}
-
-impl FrameDelivery {
-    fn clear(&mut self) {
-        self.in_flight_sequence = None;
-        self.latest_pending = None;
-    }
-
-    #[cfg(test)]
-    fn buffered_frame_count(&self) -> usize {
-        usize::from(self.in_flight_sequence.is_some()) + usize::from(self.latest_pending.is_some())
-    }
 }
 
 #[derive(Default)]
@@ -288,7 +271,7 @@ fn run_worker(receiver: &Receiver<RuntimeCommand>, factory: &Arc<dyn CoreFactory
     let mut model = RuntimeModel::default();
     let mut core: Option<Box<dyn RuntimeCore>> = None;
     let mut observer: Option<Arc<dyn RuntimeObserver>> = None;
-    let mut delivery = FrameDelivery::default();
+    let mut delivery = FrameQueue::default();
     let mut next_frame_deadline: Option<Instant> = None;
 
     loop {
@@ -347,7 +330,7 @@ fn handle_command(
     model: &mut RuntimeModel,
     core: &mut Option<Box<dyn RuntimeCore>>,
     observer: &mut Option<Arc<dyn RuntimeObserver>>,
-    delivery: &mut FrameDelivery,
+    delivery: &mut FrameQueue,
 ) -> bool {
     match command {
         RuntimeCommand::Subscribe {
@@ -526,7 +509,7 @@ fn run_tick(
     model: &mut RuntimeModel,
     core: Option<&mut (dyn RuntimeCore + '_)>,
     observer: &mut Option<Arc<dyn RuntimeObserver>>,
-    delivery: &mut FrameDelivery,
+    delivery: &mut FrameQueue,
 ) {
     let Some(active) = core else {
         model.fail_load(runtime_unavailable());
@@ -567,32 +550,27 @@ fn publish_control(
 fn offer_frame(
     frame: Frame,
     observer: &mut Option<Arc<dyn RuntimeObserver>>,
-    delivery: &mut FrameDelivery,
+    delivery: &mut FrameQueue,
 ) {
     if observer.is_none() {
         delivery.clear();
         return;
     }
-    if delivery.in_flight_sequence.is_some() {
-        delivery.latest_pending = Some(frame);
-        return;
+    if let Some(frame) = delivery.offer(frame) {
+        publish_frame(&frame, observer, delivery);
     }
-    publish_frame(&frame, observer, delivery);
 }
 
 fn publish_frame(
     frame: &Frame,
     observer: &mut Option<Arc<dyn RuntimeObserver>>,
-    delivery: &mut FrameDelivery,
+    delivery: &mut FrameQueue,
 ) {
     let Some(active) = observer.as_ref() else {
         delivery.clear();
         return;
     };
-    let sequence = frame.sequence();
-    if active.publish_frame(encode_frame_packet(frame)).is_ok() {
-        delivery.in_flight_sequence = Some(sequence);
-    } else {
+    if active.publish_frame(encode_frame_packet(frame)).is_err() {
         *observer = None;
         delivery.clear();
     }
@@ -601,16 +579,17 @@ fn publish_frame(
 fn acknowledge_frame(
     sequence: u64,
     observer: &mut Option<Arc<dyn RuntimeObserver>>,
-    delivery: &mut FrameDelivery,
+    delivery: &mut FrameQueue,
 ) -> RuntimeResult<()> {
-    if delivery.in_flight_sequence != Some(sequence) {
-        return Err(RuntimeError::new(
-            RuntimeErrorCode::InvalidLifecycle,
-            "The acknowledged frame is not awaiting presentation.",
-        ));
-    }
-    delivery.in_flight_sequence = None;
-    if let Some(frame) = delivery.latest_pending.take() {
+    let next = delivery
+        .acknowledge(sequence)
+        .map_err(|error| match error {
+            AcknowledgeError::NotInFlight => RuntimeError::new(
+                RuntimeErrorCode::InvalidLifecycle,
+                "The acknowledged frame is not awaiting presentation.",
+            ),
+        })?;
+    if let Some(frame) = next {
         publish_frame(&frame, observer, delivery);
     }
     Ok(())
@@ -1186,5 +1165,13 @@ mod tests {
         assert_eq!(runtime.test_only_buffered_frame_count(), 0);
         runtime.shutdown().expect("shutdown");
         fs::remove_file(path).expect("remove exact synthetic ROM");
+    }
+
+    #[test]
+    fn runtime_uses_the_owned_video_queue_without_local_duplicates() {
+        let source = include_str!("runtime.rs");
+        assert!(source.contains("FrameQueue"));
+        assert!(!source.contains(concat!("struct Frame", "Delivery")));
+        assert!(!source.contains(concat!("fn encode_frame", "_packet")));
     }
 }

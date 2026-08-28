@@ -1,0 +1,18 @@
+use gb_core::{Frame, SCREEN_HEIGHT, SCREEN_WIDTH};
+
+pub(crate) const FRAME_HEADER_BYTE_LENGTH: usize = 12;
+pub(crate) const FRAME_RGBA_BYTE_LENGTH: usize = SCREEN_WIDTH * SCREEN_HEIGHT * 4;
+pub(crate) const FRAME_PACKET_BYTE_LENGTH: usize =
+    FRAME_HEADER_BYTE_LENGTH + FRAME_RGBA_BYTE_LENGTH;
+
+#[must_use]
+pub(crate) fn encode_frame_packet(frame: &Frame) -> Vec<u8> {
+    debug_assert_eq!(frame.rgba().len(), FRAME_RGBA_BYTE_LENGTH);
+    let mut packet = Vec::with_capacity(FRAME_PACKET_BYTE_LENGTH);
+    packet.extend_from_slice(&frame.sequence().to_le_bytes());
+    packet.extend_from_slice(&(SCREEN_WIDTH as u16).to_le_bytes());
+    packet.extend_from_slice(&(SCREEN_HEIGHT as u16).to_le_bytes());
+    packet.extend_from_slice(frame.rgba());
+    debug_assert_eq!(packet.len(), FRAME_PACKET_BYTE_LENGTH);
+    packet
+}

@@ -1,6 +1,4 @@
-use gb_core::{
-    CartridgeMetadata, CompatibilityMode, CoreError, Frame, MapperKind, SCREEN_HEIGHT, SCREEN_WIDTH,
-};
+use gb_core::{CartridgeMetadata, CompatibilityMode, CoreError, MapperKind};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -172,10 +170,6 @@ pub enum RuntimeEvent {
 }
 
 pub type RuntimeResult<T> = Result<T, RuntimeError>;
-pub const FRAME_HEADER_BYTE_LENGTH: usize = 12;
-pub const FRAME_RGBA_BYTE_LENGTH: usize = SCREEN_WIDTH * SCREEN_HEIGHT * 4;
-pub const FRAME_PACKET_BYTE_LENGTH: usize = FRAME_HEADER_BYTE_LENGTH + FRAME_RGBA_BYTE_LENGTH;
-
 impl From<MapperKind> for RuntimeMapper {
     fn from(mapper: MapperKind) -> Self {
         match mapper {
@@ -196,33 +190,13 @@ impl From<CompatibilityMode> for RuntimeCompatibility {
     }
 }
 
-#[must_use]
-pub fn encode_frame_packet(frame: &Frame) -> Vec<u8> {
-    let mut packet = Vec::with_capacity(FRAME_PACKET_BYTE_LENGTH);
-    packet.extend_from_slice(&frame.sequence().to_le_bytes());
-    packet.extend_from_slice(
-        &u16::try_from(SCREEN_WIDTH)
-            .expect("screen width fits u16")
-            .to_le_bytes(),
-    );
-    packet.extend_from_slice(
-        &u16::try_from(SCREEN_HEIGHT)
-            .expect("screen height fits u16")
-            .to_le_bytes(),
-    );
-    packet.extend_from_slice(frame.rgba());
-    debug_assert_eq!(packet.len(), FRAME_PACKET_BYTE_LENGTH);
-    packet
-}
-
 #[cfg(test)]
 mod tests {
-    use gb_core::Frame;
     use serde_json::json;
 
     use super::{
-        FRAME_PACKET_BYTE_LENGTH, RuntimeButton, RuntimeCompatibility, RuntimeEvent, RuntimeMapper,
-        RuntimePhase, RuntimeSnapshot, encode_frame_packet,
+        RuntimeButton, RuntimeCompatibility, RuntimeEvent, RuntimeMapper, RuntimePhase,
+        RuntimeSnapshot,
     };
 
     #[test]
@@ -272,19 +246,5 @@ mod tests {
             serde_json::to_value(buttons).expect("buttons serialize"),
             json!(["up", "down", "left", "right", "a", "b", "start", "select"])
         );
-    }
-
-    #[test]
-    fn frame_packet_has_the_stable_raw_binary_layout() {
-        let rgba = vec![0x5a; 92_160];
-        let frame = Frame::new(0x0102_0304_0506_0708, rgba.clone()).expect("valid frame");
-
-        let packet = encode_frame_packet(&frame);
-
-        assert_eq!(packet.len(), FRAME_PACKET_BYTE_LENGTH);
-        assert_eq!(&packet[0..8], &[8, 7, 6, 5, 4, 3, 2, 1]);
-        assert_eq!(&packet[8..10], &[160, 0]);
-        assert_eq!(&packet[10..12], &[144, 0]);
-        assert_eq!(&packet[12..], rgba);
     }
 }
