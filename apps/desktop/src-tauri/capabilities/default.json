@@ -8,6 +8,8 @@
     "allow-foundation-status",
     "allow-emulator-runtime",
     "dialog:allow-open",
-    "store:default"
+    "process:default",
+    "store:default",
+    "updater:default"
   ]
 }
