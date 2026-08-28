@@ -6,6 +6,7 @@ pub(super) struct Mbc5 {
     rom: Vec<u8>,
     ram: Vec<u8>,
     rom_banks: usize,
+    ram_banks: usize,
     ram_enabled: bool,
     rom_bank: u16,
     ram_bank: u8,
@@ -28,10 +29,12 @@ impl Mbc5 {
             ));
         }
         let rom_banks = rom.len() / 0x4000;
+        let external_ram_banks = ram.len().div_ceil(0x2000);
         Ok(Self {
             rom,
             ram,
             rom_banks,
+            ram_banks: external_ram_banks,
             ram_enabled: false,
             rom_bank: 1,
             ram_bank: 0,
@@ -62,7 +65,15 @@ impl Mapper for Mbc5 {
             0x3000..=0x3fff => {
                 self.rom_bank = (self.rom_bank & 0x0ff) | (u16::from(value & 1) << 8);
             }
-            0x4000..=0x5fff => self.ram_bank = value & if self.has_rumble { 0x07 } else { 0x0f },
+            0x4000..=0x5fff => {
+                let selected = value & if self.has_rumble { 0x07 } else { 0x0f };
+                self.ram_bank = if self.ram_banks == 0 {
+                    0
+                } else {
+                    u8::try_from(usize::from(selected) % self.ram_banks)
+                        .expect("MBC5 supports at most sixteen RAM banks")
+                };
+            }
             _ => {}
         }
     }

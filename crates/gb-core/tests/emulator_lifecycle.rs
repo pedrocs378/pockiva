@@ -72,6 +72,16 @@ fn run_cycles_stops_at_instruction_boundary_without_exceeding_budget() {
 }
 
 #[test]
+fn four_cycle_budget_executes_halt() {
+    let mut core = core();
+    core.load_rom(&test_rom(&[0x76]), None).expect("ROM loads");
+    assert_eq!(
+        core.run_cycles(4).expect("HALT executes").cycles_executed(),
+        4
+    );
+}
+
+#[test]
 fn failed_replacement_leaves_loaded_machine_runnable() {
     let mut core = core();
     core.load_rom(&test_rom(&[0x00]), None).expect("ROM loads");

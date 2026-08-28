@@ -91,6 +91,19 @@ fn all_prefixed_opcodes_decode() {
 }
 
 #[test]
+fn halt_decodes_and_executes_in_four_t_cycles() {
+    let decoded = decode(0x76, false);
+    assert_eq!(decoded.cycles_taken, 4);
+    assert_eq!(decoded.cycles_not_taken, 4);
+
+    let mut cpu = Cpu::post_boot_dmg();
+    let mut bus = TestBus::with_program(&[0x76]);
+    assert_eq!(cpu.next_step_t_cycles(&bus), Ok(4));
+    assert_eq!(cpu.step(&mut bus).expect("HALT succeeds").t_cycles, 4);
+    assert_eq!(cpu.mode, CpuMode::Halted);
+}
+
+#[test]
 fn base_decode_marks_only_the_lr35902_illegal_opcodes() {
     let illegal = [
         0xd3, 0xdb, 0xdd, 0xe3, 0xe4, 0xeb, 0xec, 0xed, 0xf4, 0xfc, 0xfd,
@@ -213,6 +226,21 @@ fn halt_bug_reuses_the_next_opcode_byte() {
 }
 
 #[test]
+fn cb_prediction_reuses_the_prefix_byte_during_the_halt_bug() {
+    let mut cpu = Cpu::post_boot_dmg();
+    let mut bus = TestBus::with_program(&[
+        0x76, // HALT triggers the halt bug
+        0xcb, // fetched twice: prefix and CB opcode
+        0x46, // would incorrectly predict BIT 0,(HL) at 12 cycles
+    ]);
+    bus.pending = InterruptMask::from_bits(Interrupt::Timer.bit());
+
+    assert_eq!(cpu.step(&mut bus).expect("HALT succeeds").t_cycles, 4);
+    assert_eq!(cpu.next_step_t_cycles(&bus), Ok(8));
+    assert_eq!(cpu.step(&mut bus).expect("CB succeeds").t_cycles, 8);
+}
+
+#[test]
 fn stop_consumes_padding_byte_and_resets_divider() {
     let mut cpu = Cpu::post_boot_dmg();
     let mut bus = TestBus::with_program(&[0x10, 0x00]);
@@ -221,6 +249,31 @@ fn stop_consumes_padding_byte_and_resets_divider() {
     assert_eq!(cpu.registers.pc, 0x0102);
     assert_eq!(cpu.mode, CpuMode::Stopped);
     assert!(bus.divider_reset);
+}
+
+#[test]
+fn stop_ignores_non_joypad_interrupts_and_services_joypad_first() {
+    let mut cpu = Cpu::post_boot_dmg();
+    let mut bus = TestBus::with_program(&[0x10, 0x00, 0x00]);
+    cpu.step(&mut bus).expect("STOP succeeds");
+    cpu.ime = true;
+    bus.pending = InterruptMask::from_bits(
+        Interrupt::VBlank.bit() | Interrupt::Timer.bit() | Interrupt::Serial.bit(),
+    );
+
+    assert_eq!(cpu.next_step_t_cycles(&bus), Ok(0));
+    assert_eq!(cpu.step(&mut bus).expect("STOP remains asleep").t_cycles, 0);
+    assert_eq!(cpu.mode, CpuMode::Stopped);
+    assert_eq!(cpu.registers.pc, 0x0102);
+
+    bus.pending = bus
+        .pending
+        .union(InterruptMask::from_bits(Interrupt::Joypad.bit()));
+    assert_eq!(cpu.next_step_t_cycles(&bus), Ok(20));
+    assert_eq!(cpu.step(&mut bus).expect("Joypad wakes STOP").t_cycles, 20);
+    assert_eq!(cpu.registers.pc, Interrupt::Joypad.vector());
+    assert_eq!(bus.pending.bits() & Interrupt::Joypad.bit(), 0);
+    assert_ne!(bus.pending.bits() & Interrupt::VBlank.bit(), 0);
 }
 
 #[test]

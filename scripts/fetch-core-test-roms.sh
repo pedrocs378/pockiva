@@ -53,10 +53,6 @@ actual_archive_sha256="$(sha256_file "$archive")"
 
 extract_root="$temporary_directory/extracted"
 mkdir -p "$extract_root"
-tar -xJf "$archive" -C "$extract_root"
-suite_root="$(find "$extract_root" -type d -name acceptance -print -quit | xargs dirname)"
-[[ -n "$suite_root" ]] || { echo "archive does not contain acceptance tests" >&2; exit 1; }
-
 paths=(
   acceptance/bits/reg_f.gb
   acceptance/instr/daa.gb
@@ -66,6 +62,19 @@ paths=(
   acceptance/timer/tima_reload.gb
   acceptance/oam_dma/basic.gb
 )
+suite_prefix="$(tar -tJf "$archive" | sed -n 's#\(.*\)acceptance/bits/reg_f\.gb$#\1#p' | head -n 1)"
+[[ -n "$suite_prefix" ]] || { echo "archive does not contain the pinned Mooneye layout" >&2; exit 1; }
+[[ "$suite_prefix" != /* && "$suite_prefix" != *../* ]] || {
+  echo "archive contains an unsafe path prefix" >&2
+  exit 1
+}
+archive_members=()
+for relative_path in "${paths[@]}"; do
+  archive_members+=("${suite_prefix}${relative_path}")
+done
+tar -xJf "$archive" -C "$extract_root" -- "${archive_members[@]}"
+suite_root="$extract_root/$suite_prefix"
+
 for relative_path in "${paths[@]}"; do
   source_path="$suite_root/$relative_path"
   [[ -f "$source_path" ]] || { echo "archive missing $relative_path" >&2; exit 1; }

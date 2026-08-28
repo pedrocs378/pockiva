@@ -72,7 +72,13 @@ fn base_metadata(opcode: u8) -> (u8, u8, u8) {
             _ => (1, 4, 4),
         },
         1 => {
-            let cycles = if y == 6 || z == 6 { 8 } else { 4 };
+            let cycles = if opcode == 0x76 {
+                4
+            } else if y == 6 || z == 6 {
+                8
+            } else {
+                4
+            };
             (1, cycles, cycles)
         }
         2 => {

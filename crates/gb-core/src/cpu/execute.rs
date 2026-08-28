@@ -11,7 +11,7 @@ pub(crate) struct StepResult {
 }
 
 pub(super) fn next_step_t_cycles(cpu: &Cpu, bus: &impl CpuBus) -> Result<u32, CoreError> {
-    let pending = bus.pending_interrupts();
+    let pending = wake_capable_interrupts(cpu, bus.pending_interrupts());
     if cpu.mode == CpuMode::Stopped && pending.bits() == 0 {
         return Ok(0);
     }
@@ -23,7 +23,12 @@ pub(super) fn next_step_t_cycles(cpu: &Cpu, bus: &impl CpuBus) -> Result<u32, Co
     }
     let opcode = bus.peek8(cpu.registers.pc);
     let decoded = if opcode == 0xcb {
-        decode(bus.peek8(cpu.registers.pc.wrapping_add(1)), true)
+        let prefixed_address = if cpu.halt_bug {
+            cpu.registers.pc
+        } else {
+            cpu.registers.pc.wrapping_add(1)
+        };
+        decode(bus.peek8(prefixed_address), true)
     } else {
         decode(opcode, false)
     };
@@ -42,7 +47,7 @@ pub(super) fn next_step_t_cycles(cpu: &Cpu, bus: &impl CpuBus) -> Result<u32, Co
 
 pub(super) fn step(cpu: &mut Cpu, bus: &mut impl CpuBus) -> Result<StepResult, CoreError> {
     let start = bus.elapsed_t_cycles();
-    let pending = bus.pending_interrupts();
+    let pending = wake_capable_interrupts(cpu, bus.pending_interrupts());
     if cpu.ime && pending.bits() != 0 {
         service_interrupt(
             cpu,
@@ -110,6 +115,19 @@ pub(super) fn step(cpu: &mut Cpu, bus: &mut impl CpuBus) -> Result<StepResult, C
         #[cfg(test)]
         debug_breakpoint: opcode == 0x40,
     })
+}
+
+fn wake_capable_interrupts(
+    cpu: &Cpu,
+    pending: crate::interrupts::InterruptMask,
+) -> crate::interrupts::InterruptMask {
+    if cpu.mode == CpuMode::Stopped {
+        pending.intersection(crate::interrupts::InterruptMask::from_bits(
+            Interrupt::Joypad.bit(),
+        ))
+    } else {
+        pending
+    }
 }
 
 fn elapsed(bus: &impl CpuBus, start: u64) -> u32 {

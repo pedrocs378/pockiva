@@ -37,14 +37,29 @@ fn run_rom(path: &Path, max_t_cycles: u64, signal: &RomSignal) -> Result<(), Str
     );
     core.load_rom(&rom, None)
         .map_err(|error| error.to_string())?;
+    run_core(&mut core, max_t_cycles, signal)
+}
+
+fn run_core(
+    core: &mut GameBoy<FixedClock>,
+    max_t_cycles: u64,
+    signal: &RomSignal,
+) -> Result<(), String> {
     let mut elapsed = 0_u64;
     while elapsed < max_t_cycles {
+        let next = core
+            .next_step_for_rom_test()
+            .map_err(|error| error.to_string())?;
+        if next == 0 {
+            return Err("core stopped before producing a pass/fail signal".into());
+        }
+        if u64::from(next) > max_t_cycles - elapsed {
+            break;
+        }
         let (cycles, breakpoint) = core
             .run_one_for_rom_test()
             .map_err(|error| error.to_string())?;
-        if cycles == 0 {
-            return Err("core stopped before producing a pass/fail signal".into());
-        }
+        debug_assert_eq!(cycles, next);
         elapsed += u64::from(cycles);
         match signal {
             RomSignal::BlarggSerial(expected) => {
@@ -75,6 +90,43 @@ fn run_rom(path: &Path, max_t_cycles: u64, signal: &RomSignal) -> Result<(), Str
     Err(format!(
         "ROM timed out at the exact {max_t_cycles} T-cycle bound"
     ))
+}
+
+fn synthetic_rom(program: &[u8]) -> Vec<u8> {
+    let mut rom = vec![0; 0x8000];
+    rom[0x0100..0x0100 + program.len()].copy_from_slice(program);
+    rom[0x0147] = 0;
+    rom[0x0148] = 0;
+    rom[0x0149] = 0;
+    rom[0x014d] = rom[0x0134..=0x014c]
+        .iter()
+        .fold(0_u8, |sum, byte| sum.wrapping_sub(*byte).wrapping_sub(1));
+    rom
+}
+
+#[test]
+fn rom_signal_after_cycle_limit_is_rejected() {
+    let mut core = GameBoy::new(
+        FixedClock,
+        NonZeroU32::new(48_000).expect("non-zero sample rate"),
+    );
+    core.load_rom(&synthetic_rom(&[0x40]), None)
+        .expect("synthetic ROM loads");
+    let expected = core.diagnostic_registers();
+
+    assert_eq!(
+        run_core(&mut core, 3, &RomSignal::MooneyeRegisters(expected)),
+        Err("ROM timed out at the exact 3 T-cycle bound".into())
+    );
+}
+
+#[test]
+fn fetch_script_extracts_only_the_pinned_members() {
+    let script = include_str!("../../../scripts/fetch-core-test-roms.sh");
+    assert!(
+        script.contains("tar -xJf \"$archive\" -C \"$extract_root\" -- \"${archive_members[@]}\"")
+    );
+    assert!(!script.contains("tar -xJf \"$archive\" -C \"$extract_root\"\n"));
 }
 
 macro_rules! mooneye_test {

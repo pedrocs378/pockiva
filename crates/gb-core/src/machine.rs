@@ -38,6 +38,13 @@ impl<C: Clock + Send> GameBoy<C> {
     }
 
     #[cfg(test)]
+    pub(crate) fn next_step_for_rom_test(&mut self) -> Result<u32, CoreError> {
+        let bus = self.bus.as_mut().ok_or(CoreError::NotLoaded)?;
+        bus.set_unix_seconds(self.clock.unix_seconds());
+        self.cpu.next_step_t_cycles(bus)
+    }
+
+    #[cfg(test)]
     pub(crate) const fn diagnostic_registers(&self) -> [u8; 6] {
         self.cpu.diagnostic_registers()
     }

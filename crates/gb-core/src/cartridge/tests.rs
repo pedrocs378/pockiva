@@ -209,6 +209,22 @@ fn mbc5_uses_nine_rom_bits_and_masks_rumble_from_ram_bank() {
 }
 
 #[test]
+fn mbc5_normalizes_selected_ram_bank_to_actual_capacity() {
+    let mut mapper =
+        Mbc5::new(numbered_rom(4, 0x1b, 2), 0x2000, false, true, None).expect("MBC5 constructs");
+    mapper.write_rom(0x0000, 0x0a, 0);
+    mapper.write_rom(0x4000, 0, 0);
+    mapper.write_ram(0xa000, 0x5a, 0);
+
+    mapper.write_rom(0x4000, 1, 0);
+    assert_eq!(mapper.selected_ram_bank(), 0);
+    assert_eq!(mapper.read_ram(0xa000, 0), 0x5a);
+    mapper.write_ram(0xa000, 0xa5, 0);
+    mapper.write_rom(0x4000, 0, 0);
+    assert_eq!(mapper.read_ram(0xa000, 0), 0xa5);
+}
+
+#[test]
 fn persisted_state_requires_version_ram_size_and_mapper_schema() {
     let rom = numbered_rom(2, 0x09, 2);
     let wrong_version = BatteryState::new(2, vec![0; 0x2000], Vec::new());
