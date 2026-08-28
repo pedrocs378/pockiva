@@ -43,8 +43,9 @@ select {
 }
 
 .emulator-card {
-  width: min(100%, 48rem);
-  padding: 1.5rem;
+  width: min(100%, 40rem);
+  gap: 1rem;
+  padding: 1rem 0;
   border: 1px solid var(--border);
   border-radius: 1.25rem;
   background: color-mix(in srgb, var(--card) 92%, transparent);
@@ -96,6 +97,88 @@ h1 {
   image-rendering: pixelated;
 }
 
+.game-viewport-shell {
+  position: relative;
+  display: grid;
+  width: min(100%, 27rem);
+  aspect-ratio: 10 / 9;
+  margin: 1.5rem auto;
+  overflow: hidden;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: #000;
+}
+
+.game-viewport-canvas {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 10 / 9;
+  background: #000;
+  image-rendering: pixelated;
+}
+
+.game-viewport-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+
+.game-viewport-overlay-muted {
+  color: var(--foreground);
+  background: rgb(0 0 0 / 55%);
+  font-weight: 700;
+}
+
+.game-viewport-error {
+  background: #000;
+}
+
+.rom-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.2rem 0.75rem;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.rom-summary strong,
+.rom-summary span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rom-summary span {
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+}
+
+.rom-summary [data-slot="badge"] {
+  grid-row: 1 / 3;
+  grid-column: 2;
+}
+
+.runtime-alert {
+  margin-bottom: 1rem;
+}
+
+.lifecycle-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.remote-footer {
+  justify-content: flex-end;
+}
+
 .foundation-actions {
   justify-content: space-between;
   gap: 1rem;
@@ -120,6 +203,12 @@ h1 {
 
 .remote-status {
   gap: 0.65rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
 }
 
 .remote-status div {
