@@ -10,8 +10,10 @@ pub(crate) fn encode_frame_packet(frame: &Frame) -> Vec<u8> {
     debug_assert_eq!(frame.rgba().len(), FRAME_RGBA_BYTE_LENGTH);
     let mut packet = Vec::with_capacity(FRAME_PACKET_BYTE_LENGTH);
     packet.extend_from_slice(&frame.sequence().to_le_bytes());
-    packet.extend_from_slice(&(SCREEN_WIDTH as u16).to_le_bytes());
-    packet.extend_from_slice(&(SCREEN_HEIGHT as u16).to_le_bytes());
+    let width = u16::try_from(SCREEN_WIDTH).expect("Game Boy screen width fits in u16");
+    let height = u16::try_from(SCREEN_HEIGHT).expect("Game Boy screen height fits in u16");
+    packet.extend_from_slice(&width.to_le_bytes());
+    packet.extend_from_slice(&height.to_le_bytes());
     packet.extend_from_slice(frame.rgba());
     debug_assert_eq!(packet.len(), FRAME_PACKET_BYTE_LENGTH);
     packet

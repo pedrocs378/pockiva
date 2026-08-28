@@ -4,13 +4,17 @@ use super::packet::{FRAME_PACKET_BYTE_LENGTH, FRAME_RGBA_BYTE_LENGTH};
 use super::{AcknowledgeError, FrameQueue, encode_frame_packet};
 
 fn frame(sequence: u64) -> Frame {
-    Frame::new(sequence, vec![sequence as u8; FRAME_RGBA_BYTE_LENGTH]).expect("valid frame")
+    Frame::new(
+        sequence,
+        vec![sequence.to_le_bytes()[0]; FRAME_RGBA_BYTE_LENGTH],
+    )
+    .expect("valid frame")
 }
 
 #[test]
 fn raw_packet_is_fixed_little_endian_rgba_without_text_encoding() {
     let rgba = (0..FRAME_RGBA_BYTE_LENGTH)
-        .map(|index| index as u8)
+        .map(|index| index.to_le_bytes()[0])
         .collect();
     let frame = Frame::new(0x0102_0304_0506_0708, rgba).expect("valid frame");
     let packet = encode_frame_packet(&frame);
