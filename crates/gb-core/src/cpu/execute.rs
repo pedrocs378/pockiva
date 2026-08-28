@@ -411,7 +411,8 @@ fn execute_base(cpu: &mut Cpu, bus: &mut impl CpuBus, opcode: u8) -> Result<bool
                     cpu.ime = false;
                     cpu.ime_enable_delay = 0;
                 }
-                7 => cpu.ime_enable_delay = 2,
+                7 if cpu.ime_enable_delay == 0 => cpu.ime_enable_delay = 2,
+                7 => {}
                 _ => {}
             },
             4 => {

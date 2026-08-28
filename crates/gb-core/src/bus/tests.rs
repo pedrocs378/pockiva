@@ -72,6 +72,21 @@ fn serial_capture_is_bounded() {
     assert_eq!(bus.serial_output().len(), 4096);
 }
 
+#[test]
+fn timer_write_takes_effect_before_the_access_cycle_ticks() {
+    let mut bus = test_bus();
+    bus.write_unclocked(0xff04, 0);
+    bus.write_unclocked(0xff05, 0);
+    bus.write_unclocked(0xff07, 0b101);
+
+    bus.write8(0xff04, 0);
+    bus.idle_m_cycle();
+    bus.idle_m_cycle();
+    bus.idle_m_cycle();
+
+    assert_eq!(bus.read_unclocked(0xff05), 1);
+}
+
 fn assert_send<T: Send>() {}
 
 #[test]

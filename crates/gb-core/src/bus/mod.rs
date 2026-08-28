@@ -219,8 +219,12 @@ impl CpuBus for MachineBus {
     fn write8(&mut self, address: u16, value: u8) {
         let allowed =
             !self.dma.active() || (0xff80..=0xfffe).contains(&address) || address == 0xff46;
+        let timer_write = allowed && (0xff04..=0xff07).contains(&address);
+        if timer_write {
+            self.write_unclocked(address, value);
+        }
         self.tick_m_cycle();
-        if allowed {
+        if allowed && !timer_write {
             self.write_unclocked(address, value);
         }
     }

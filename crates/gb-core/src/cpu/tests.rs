@@ -186,6 +186,20 @@ fn ei_defers_interrupt_service_until_after_the_following_instruction() {
 }
 
 #[test]
+fn consecutive_ei_instructions_do_not_postpone_the_first_enable() {
+    let mut cpu = Cpu::post_boot_dmg();
+    let mut bus = TestBus::with_program(&[0xfb, 0xfb, 0xfb]);
+    bus.pending = InterruptMask::from_bits(Interrupt::Serial.bit());
+
+    cpu.step(&mut bus).expect("first EI succeeds");
+    cpu.step(&mut bus).expect("second EI succeeds");
+    assert_eq!(cpu.registers.pc, 0x0102);
+    assert_eq!(cpu.next_step_t_cycles(&bus), Ok(20));
+    cpu.step(&mut bus).expect("interrupt succeeds");
+    assert_eq!(cpu.registers.pc, Interrupt::Serial.vector());
+}
+
+#[test]
 fn halt_bug_reuses_the_next_opcode_byte() {
     let mut cpu = Cpu::post_boot_dmg();
     let mut bus = TestBus::with_program(&[0x76, 0x3e, 0x42]);
