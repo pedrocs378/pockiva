@@ -41,8 +41,22 @@ export const useControllerSession = (
   const snapshot = useSyncExternalStore<SessionSnapshot | MissingTokenSnapshot>(subscribe, getSnapshot, getSnapshot)
 
   useEffect(() => {
-    session?.connect()
-    return () => session?.disconnect()
+    if (!session) return
+
+    const syncActivity = () => session.setActive(document.visibilityState === 'visible')
+    const pauseActivity = () => session.setActive(false)
+    syncActivity()
+    session.connect()
+    document.addEventListener('visibilitychange', syncActivity)
+    window.addEventListener('pagehide', pauseActivity)
+    window.addEventListener('pageshow', syncActivity)
+
+    return () => {
+      document.removeEventListener('visibilitychange', syncActivity)
+      window.removeEventListener('pagehide', pauseActivity)
+      window.removeEventListener('pageshow', syncActivity)
+      session.disconnect()
+    }
   }, [session])
 
   const connect = useCallback(() => session?.connect(), [session])

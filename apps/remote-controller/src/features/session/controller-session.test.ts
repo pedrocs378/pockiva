@@ -152,6 +152,56 @@ describe('ControllerSession', () => {
     expect(session.getSnapshot().status).toBe('connected')
   })
 
+  it('pauses recovery while inactive and resumes one attempt with desired input', async () => {
+    vi.useFakeTimers()
+    const server = new MockControllerServer()
+    const session = createSession(server)
+    session.connect()
+    await flushMicrotasks()
+    session.setButton('left', true)
+
+    session.setActive(false)
+    server.dropConnection()
+    expect(session.getSnapshot()).toMatchObject({ status: 'connecting', reconnectAttempt: 0 })
+    expect(vi.getTimerCount()).toBe(0)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(server.connectionCount).toBe(1)
+
+    session.setActive(false)
+    session.setActive(true)
+    session.setActive(true)
+    await flushMicrotasks()
+    expect(server.connectionCount).toBe(2)
+    expect(server.receivedMessages.at(-1)).toEqual({
+      type: 'state-sync',
+      buttons: ['left'],
+      sequence: 2
+    })
+  })
+
+  it('cancels a pending retry without consuming another attempt while inactive', async () => {
+    vi.useFakeTimers()
+    const server = new MockControllerServer({ failConnections: true })
+    const session = createSession(server, { reconnectDelaysMs: [1_000, 2_000] })
+    session.connect()
+    await flushMicrotasks()
+    expect(session.getSnapshot().reconnectAttempt).toBe(1)
+    expect(vi.getTimerCount()).toBe(1)
+
+    session.setActive(false)
+    expect(vi.getTimerCount()).toBe(0)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(server.connectionCount).toBe(1)
+    expect(session.getSnapshot().reconnectAttempt).toBe(1)
+
+    server.failConnections = false
+    session.setActive(true)
+    session.setActive(true)
+    await flushMicrotasks()
+    expect(server.connectionCount).toBe(2)
+    expect(session.getSnapshot().status).toBe('connected')
+  })
+
   it('manual disconnect releases all input and never reconnects', async () => {
     vi.useFakeTimers()
     const server = new MockControllerServer()
@@ -160,6 +210,8 @@ describe('ControllerSession', () => {
     await flushMicrotasks()
     session.setButton('a', true)
     session.disconnect()
+    session.setActive(false)
+    session.setActive(true)
     await vi.runOnlyPendingTimersAsync()
 
     expect(server.receivedMessages.at(-1)).toMatchObject({ type: 'state-sync', buttons: [] })

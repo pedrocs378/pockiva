@@ -70,7 +70,9 @@ export class ControllerSession {
   }
   private connection: SessionConnection | null = null
   private generation = 0
+  private active = true
   private reconnectEnabled = false
+  private recoveryPending = false
   private retryIndex = 0
   private nextSequence: number
   private awaitedPong: number | null = null
@@ -109,11 +111,35 @@ export class ControllerSession {
     this.startConnection()
   }
 
+  setActive = (active: boolean): void => {
+    if (this.active === active) return
+    this.active = active
+
+    if (!active) {
+      if (this.reconnectEnabled && (this.retryTimer !== null || this.connection === null)) {
+        this.recoveryPending = true
+      }
+      this.cancelAllTimers()
+      return
+    }
+
+    if (!this.reconnectEnabled) return
+    if (this.snapshot.status === 'connected' && this.connection !== null) {
+      this.scheduleNextPing()
+      return
+    }
+    if (!this.recoveryPending || this.connection !== null || this.retryTimer !== null) return
+
+    this.recoveryPending = false
+    this.startConnection()
+  }
+
   disconnect = (): void => {
     if (this.snapshot.status === 'connected') this.syncButtons([])
     else this.desiredButtons.clear()
 
     this.reconnectEnabled = false
+    this.recoveryPending = false
     this.cancelAllTimers()
     const connection = this.connection
     this.connection = null
@@ -149,6 +175,12 @@ export class ControllerSession {
 
   private startConnection(): void {
     this.cancelHeartbeat()
+    if (!this.active) {
+      this.recoveryPending = true
+      this.publish({ status: 'connecting', controllerId: null, reconnectAttempt: this.retryIndex })
+      return
+    }
+
     const generation = ++this.generation
     this.publish({ status: 'connecting', controllerId: null, reconnectAttempt: this.retryIndex })
 
@@ -184,6 +216,7 @@ export class ControllerSession {
     switch (message.type) {
       case 'welcome':
         this.retryIndex = 0
+        this.recoveryPending = false
         this.publish({ status: 'connected', controllerId: message.controllerId, reconnectAttempt: 0 })
         if (this.sendStateSync()) this.scheduleNextPing()
         break
@@ -231,6 +264,7 @@ export class ControllerSession {
 
   private failTerminal(status: SessionStatus, code: number, reason: string): void {
     this.reconnectEnabled = false
+    this.recoveryPending = false
     this.cancelAllTimers()
     const connection = this.connection
     this.connection = null
@@ -241,6 +275,12 @@ export class ControllerSession {
   private scheduleRetry(generation: number): void {
     if (!this.isCurrent(generation) || !this.reconnectEnabled || this.retryTimer !== null) return
     this.cancelHeartbeat()
+
+    if (!this.active) {
+      this.recoveryPending = true
+      this.publish({ status: 'connecting', controllerId: null, reconnectAttempt: this.retryIndex })
+      return
+    }
 
     const delayMs = this.reconnectDelaysMs[this.retryIndex]
     if (delayMs === undefined) {
@@ -258,7 +298,7 @@ export class ControllerSession {
   }
 
   private scheduleNextPing(): void {
-    if (this.snapshot.status !== 'connected') return
+    if (!this.active || this.snapshot.status !== 'connected') return
     if (this.nextPingTimer !== null) this.scheduler.clearTimeout(this.nextPingTimer)
     this.nextPingTimer = this.scheduler.setTimeout(() => {
       this.nextPingTimer = null
