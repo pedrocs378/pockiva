@@ -1,0 +1,10 @@
+[blargg_dmg_sound]
+project = "Blargg Game Boy sound hardware tests mirror"
+revision = "c240dd7d700e5c0b00a7bbba52b53e4ee67b5f15"
+source_url = "https://github.com/retrio/gb-test-roms/tree/c240dd7d700e5c0b00a7bbba52b53e4ee67b5f15/dmg_sound"
+redistribution = "not granted by the mirror readme"
+local_only = true
+path = "dmg_sound/dmg_sound.gb"
+sha256 = "c34e740664eb14b42c39750434e3e105fc92d774a98fb671594a48e972401630"
+signal = "memory:A000=00,A001-A003=DE-B0-61,A004 contains Passed"
+max_t_cycles = 2000000000

@@ -8,6 +8,10 @@ mod interrupts;
 mod joypad;
 mod machine;
 mod ppu;
+
+#[cfg(test)]
+#[path = "apu/rom_tests.rs"]
+mod apu_rom_tests;
 mod timer;
 
 pub mod contracts;
