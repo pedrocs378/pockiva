@@ -21,6 +21,15 @@
   box-sizing: border-box;
 }
 
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 body {
   margin: 0;
   min-width: 320px;
@@ -61,6 +70,13 @@ fieldset {
   background: radial-gradient(circle at 50% 10%, rgb(63 63 70 / 55%), transparent 38%), var(--background);
 }
 
+.controller-shell,
+.controls {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
 .controller-header,
 .connection-state,
 .controls,
@@ -73,6 +89,20 @@ fieldset {
 .controller-header {
   justify-content: space-between;
   gap: 1rem;
+}
+
+.session-summary {
+  display: grid;
+  justify-items: end;
+  gap: 0.4rem;
+  text-align: right;
+}
+
+.session-help {
+  max-width: 24rem;
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
 }
 
 .controller-header p,
@@ -98,8 +128,10 @@ h1 {
 }
 
 .controls {
+  min-height: 0;
   justify-content: space-between;
   gap: clamp(1rem, 5vw, 4rem);
+  touch-action: none;
 }
 
 .d-pad {
@@ -126,11 +158,24 @@ h1 {
 }
 
 .control-button {
+  min-width: 48px;
+  min-height: 48px;
   border: 1px solid #52525b;
   color: var(--foreground);
   background: var(--muted);
   font-weight: 700;
-  touch-action: manipulation;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform 80ms ease,
+    box-shadow 80ms ease,
+    filter 80ms ease;
+}
+
+.control-button[data-pressed="true"] {
+  transform: translateY(3px) scale(0.96);
+  box-shadow: inset 0 3px 8px rgb(0 0 0 / 45%);
+  filter: brightness(1.28);
 }
 
 .control-button:disabled {
@@ -178,6 +223,15 @@ footer {
   .controls {
     display: grid;
     grid-template: 1fr auto / 1fr 1fr;
+    align-content: center;
+  }
+
+  .d-pad {
+    width: min(42vw, 12rem);
+  }
+
+  .action-controls {
+    width: min(38vw, 11rem);
   }
 
   .menu-controls {
@@ -190,10 +244,24 @@ footer {
 @media (orientation: landscape) and (max-height: 32rem) {
   .controller-shell {
     gap: 0.5rem;
+    padding: max(0.5rem, env(safe-area-inset-top)) max(0.75rem, env(safe-area-inset-right))
+      max(0.5rem, env(safe-area-inset-bottom)) max(0.75rem, env(safe-area-inset-left));
+  }
+
+  .controls {
+    align-self: center;
   }
 
   .d-pad,
   .action-controls {
-    width: min(31vh, 10rem);
+    width: min(31dvh, 10rem);
+  }
+
+  .menu-controls {
+    align-self: center;
+  }
+
+  footer {
+    display: none;
   }
 }
