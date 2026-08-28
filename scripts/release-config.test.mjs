@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
@@ -84,5 +84,36 @@ describe('signing key isolation', () => {
 describe('release workflow', () => {
   it('requires the guarded develop-to-main release path and draft aggregation', async () => {
     await assert.doesNotReject(() => validateReleaseWorkflow())
+  })
+
+  it('pins current actions and reads Node.js from .tool-versions in every workflow', async () => {
+    const [ciWorkflow, releaseWorkflow] = await Promise.all([
+      readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8'),
+      readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
+    ])
+    const workflows = [ciWorkflow, releaseWorkflow]
+    const allowedActions = new Set([
+      'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
+      'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020',
+      'dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c',
+      'pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86',
+      'tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f'
+    ])
+
+    for (const workflow of workflows) {
+      assert.doesNotMatch(workflow, /^\s*NODE_VERSION:/m)
+      assert.doesNotMatch(workflow, /^\s*node-version:/m)
+
+      const actionReferences = [...workflow.matchAll(/^\s*uses:\s*([^\s#]+)/gm)].map((match) => match[1])
+      assert.ok(actionReferences.length > 0)
+      assert.ok(
+        actionReferences.every((reference) => allowedActions.has(reference)),
+        'all actions must use approved SHAs'
+      )
+
+      const setupNodeCount = actionReferences.filter((reference) => reference.startsWith('actions/setup-node@')).length
+      const nodeVersionFileCount = workflow.match(/^\s*node-version-file:\s*\.tool-versions\s*$/gm)?.length ?? 0
+      assert.equal(nodeVersionFileCount, setupNodeCount)
+    }
   })
 })
