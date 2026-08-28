@@ -20,7 +20,7 @@ export const VirtualJoystick = ({ disabled, setPointerButtons, releasePointer }:
     if (event.pointerId !== activePointer.current) return
 
     const bounds = event.currentTarget.getBoundingClientRect()
-    const maxDistance = Math.min(bounds.width, bounds.height) * 0.3
+    const maxDistance = Math.min(bounds.width, bounds.height) * 0.27
     const resolution = resolveJoystickVector(
       {
         x: event.clientX - (bounds.left + bounds.width / 2),

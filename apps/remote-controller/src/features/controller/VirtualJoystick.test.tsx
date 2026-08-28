@@ -67,6 +67,15 @@ describe('VirtualJoystick', () => {
     expect(screen.getByText('Centered')).toBeInTheDocument()
   })
 
+  it('keeps extreme knob movement within 27 percent of the base', () => {
+    const { joystick } = setup()
+    pointerDown(joystick)
+
+    fireEvent.pointerMove(joystick, { pointerId: 4, pointerType: 'touch', clientX: 300, clientY: 100 })
+
+    expect(joystick.querySelector('.joystick-knob')).toHaveStyle({ transform: 'translate(54px, 0px)' })
+  })
+
   it.each(['pointerUp', 'pointerCancel', 'lostPointerCapture'] as const)('releases once on %s', (eventName) => {
     const { joystick, releasePointer } = setup()
     pointerDown(joystick)

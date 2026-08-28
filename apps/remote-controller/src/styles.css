@@ -384,7 +384,7 @@ footer {
   .d-pad,
   .virtual-joystick,
   .action-controls {
-    width: min(38dvh, 11rem);
+    width: clamp(9rem, 38dvh, 11rem);
   }
 
   .action {

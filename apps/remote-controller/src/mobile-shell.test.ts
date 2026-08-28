@@ -32,7 +32,9 @@ describe('mobile controller shell', () => {
 
   it('enlarges landscape gameplay controls and keeps short screens safe', () => {
     expect(styles).toContain('@media (orientation: landscape) and (max-height: 32rem)')
+    expect(styles).toContain('@media (orientation: landscape) and (max-height: 22rem)')
     expect(styles).toContain('width: min(42dvh, 13rem)')
+    expect(styles).toContain('width: clamp(9rem, 38dvh, 11rem)')
     expect(styles).toContain('width: clamp(4rem, 20dvh, 5.5rem)')
     expect(styles).toContain('env(safe-area-inset-left)')
     expect(styles).toContain('env(safe-area-inset-right)')
