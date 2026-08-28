@@ -42,4 +42,4 @@ Results:
 
 ## Windows x64
 
-Native Windows x64 packaging and end-to-end persistence/audio validation remain pending. They belong to the final cross-platform validation in PED-40; PED-64 should remain in progress until that acceptance criterion is exercised.
+Windows x64 support remains implemented through the cross-platform desktop UI, Tauri persistence boundary, keyboard shortcuts, and platform audio adapter. By explicit user decision on 2026-08-28, acceptance for this delivery is macOS-only, so native Windows packaging and end-to-end persistence/audio validation are deferred and do not block PED-64 completion.
