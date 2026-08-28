@@ -4,7 +4,7 @@
   "scripts": {
     "build": "pnpm -r --if-present build",
     "dev:desktop": "pnpm --filter @gameboy/desktop tauri dev",
-    "dev:remote": "pnpm --filter @gameboy/remote-controller dev",
+    "dev:remote": "pnpm --filter @gameboy/remote-controller dev --host",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "typecheck": "pnpm -r --if-present typecheck",
