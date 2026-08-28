@@ -257,6 +257,14 @@ footer {
     width: min(31dvh, 10rem);
   }
 
+  .action-controls {
+    margin-inline: 0.75rem;
+  }
+
+  .action {
+    width: clamp(3rem, 15dvh, 4rem);
+  }
+
   .menu-controls {
     align-self: center;
   }

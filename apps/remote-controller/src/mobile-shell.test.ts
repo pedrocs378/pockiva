@@ -29,4 +29,9 @@ describe('mobile controller shell', () => {
     expect(styles).toContain('env(safe-area-inset-top)')
     expect(styles).toContain('env(safe-area-inset-bottom)')
   })
+
+  it('reserves landscape space for the rotated action controls', () => {
+    expect(styles).toContain('margin-inline: 0.75rem')
+    expect(styles).toContain('width: clamp(3rem, 15dvh, 4rem)')
+  })
 })
