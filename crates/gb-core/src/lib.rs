@@ -19,3 +19,6 @@ pub use machine::GameBoy;
 
 pub const DMG_CLOCK_HZ: u32 = 4_194_304;
 pub const T_CYCLES_PER_M_CYCLE: u32 = 4;
+
+#[cfg(test)]
+mod rom_tests;

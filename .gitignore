@@ -12,3 +12,4 @@ coverage/
 *.gb
 *.gbc
 *.sav
+tests/roms/downloads/
