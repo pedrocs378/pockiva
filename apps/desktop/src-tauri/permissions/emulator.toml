@@ -1,0 +1,14 @@
+[[permission]]
+identifier = "allow-emulator-runtime"
+description = "Allows the main window to control the local emulator runtime."
+commands.allow = [
+  "runtime_snapshot",
+  "subscribe_runtime",
+  "open_rom",
+  "start_rom",
+  "pause_rom",
+  "restart_rom",
+  "close_rom",
+  "set_keyboard_input",
+  "acknowledge_frame",
+]

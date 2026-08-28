@@ -1,7 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Minimum capability set for the foundation shell",
+  "description": "Minimum capability set for the local desktop emulator",
   "windows": ["main"],
-  "permissions": ["core:default", "allow-foundation-status"]
+  "permissions": [
+    "core:default",
+    "allow-foundation-status",
+    "allow-emulator-runtime",
+    "dialog:allow-open",
+    "store:default"
+  ]
 }

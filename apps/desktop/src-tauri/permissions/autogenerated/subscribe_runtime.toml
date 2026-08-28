@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-subscribe-runtime"
+description = "Enables the subscribe_runtime command without any pre-configured scope."
+commands.allow = ["subscribe_runtime"]
+
+[[permission]]
+identifier = "deny-subscribe-runtime"
+description = "Denies the subscribe_runtime command without any pre-configured scope."
+commands.deny = ["subscribe_runtime"]

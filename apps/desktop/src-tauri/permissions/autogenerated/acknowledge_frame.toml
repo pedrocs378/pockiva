@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-acknowledge-frame"
+description = "Enables the acknowledge_frame command without any pre-configured scope."
+commands.allow = ["acknowledge_frame"]
+
+[[permission]]
+identifier = "deny-acknowledge-frame"
+description = "Denies the acknowledge_frame command without any pre-configured scope."
+commands.deny = ["acknowledge_frame"]

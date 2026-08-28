@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-restart-rom"
+description = "Enables the restart_rom command without any pre-configured scope."
+commands.allow = ["restart_rom"]
+
+[[permission]]
+identifier = "deny-restart-rom"
+description = "Denies the restart_rom command without any pre-configured scope."
+commands.deny = ["restart_rom"]
