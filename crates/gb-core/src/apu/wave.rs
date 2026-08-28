@@ -1,5 +1,8 @@
 use super::length::LengthCounter;
 
+const CPU_READ_T_CYCLES: u16 = 4;
+const APU_FETCH_T_CYCLES: u16 = 2;
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct WaveChannel {
     enabled: bool,
@@ -52,8 +55,8 @@ impl WaveChannel {
     }
 
     fn trigger(&mut self, next_step_clocks_length: bool) {
-        if self.enabled && self.access_window_t_cycles > 0 {
-            let byte_index = usize::from(self.position / 2);
+        if self.enabled && self.timer == APU_FETCH_T_CYCLES {
+            let byte_index = usize::from(((self.position + 1) & 31) / 2);
             if byte_index < 4 {
                 self.wave_ram[0] = self.wave_ram[byte_index];
             } else {
@@ -64,8 +67,7 @@ impl WaveChannel {
         let _ = self.length.trigger(next_step_clocks_length);
         self.enabled = self.dac_enabled;
         self.position = 0;
-        self.sample_buffer = self.wave_ram[0];
-        self.timer = self.period();
+        self.timer = self.period() + 6;
         self.access_window_t_cycles = 0;
     }
 
@@ -76,7 +78,7 @@ impl WaveChannel {
             self.timer = self.period();
             self.position = (self.position + 1) & 31;
             self.sample_buffer = self.wave_ram[usize::from(self.position / 2)];
-            self.access_window_t_cycles = 2;
+            self.access_window_t_cycles = 1;
         }
     }
 
@@ -101,8 +103,8 @@ impl WaveChannel {
     pub(crate) fn read_wave_ram(&self, address: u16) -> u8 {
         if !self.enabled {
             self.wave_ram[usize::from(address - 0xff30)]
-        } else if self.access_window_t_cycles > 0 {
-            self.wave_ram[usize::from(self.position / 2)]
+        } else if self.timer == CPU_READ_T_CYCLES {
+            self.wave_ram[usize::from(((self.position + 1) & 31) / 2)]
         } else {
             0xff
         }
@@ -131,5 +133,90 @@ impl WaveChannel {
         let wave_ram = self.wave_ram;
         *self = Self::default();
         self.wave_ram = wave_ram;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WaveChannel;
+
+    #[test]
+    fn trigger_waits_six_extra_t_cycles_before_first_wave_ram_fetch() {
+        let mut wave = WaveChannel::default();
+        wave.write_wave_ram(0xff30, 0xf1);
+        wave.write(0, 0x80, true);
+        wave.write(2, 0x20, true);
+        wave.write(3, 0xff, true);
+        wave.write(4, 0x87, true);
+
+        assert_eq!(wave.output(), 0);
+        for elapsed in 1..8 {
+            wave.tick_t_cycle();
+            assert_eq!(
+                wave.position, 0,
+                "wave position must not advance after {elapsed} T-cycles"
+            );
+            assert_eq!(wave.output(), 0);
+        }
+        wave.tick_t_cycle();
+        assert_eq!(wave.position, 1);
+        assert_eq!(wave.output(), 1);
+    }
+
+    #[test]
+    fn wave_ram_read_predicts_fetch_at_end_of_cpu_access() {
+        let mut wave = WaveChannel::default();
+        wave.write_wave_ram(0xff30, 0x12);
+        wave.write(0, 0x80, true);
+        wave.write(3, 0xfe, true);
+        wave.write(4, 0x87, true);
+
+        for _ in 0..6 {
+            wave.tick_t_cycle();
+        }
+        assert_eq!(wave.read_wave_ram(0xff3f), 0x12);
+        wave.tick_t_cycle();
+        assert_eq!(wave.read_wave_ram(0xff3f), 0xff);
+    }
+
+    #[test]
+    fn write_is_redirected_only_on_fetch_t_cycle() {
+        let mut wave = WaveChannel::default();
+        wave.write_wave_ram(0xff30, 0x12);
+        wave.write_wave_ram(0xff3f, 0xfe);
+        wave.write(0, 0x80, true);
+        wave.write(3, 0xfe, true);
+        wave.write(4, 0x87, true);
+
+        for _ in 0..10 {
+            wave.tick_t_cycle();
+        }
+        wave.write_wave_ram(0xff3f, 0xab);
+        wave.write(0, 0, true);
+
+        assert_eq!(wave.read_wave_ram(0xff30), 0xab);
+        assert_eq!(wave.read_wave_ram(0xff3f), 0xfe);
+    }
+
+    #[test]
+    fn retrigger_corrupts_from_byte_due_on_next_fetch() {
+        let mut wave = WaveChannel::default();
+        for (index, value) in (0x10..=0x1f).enumerate() {
+            wave.write_wave_ram(
+                0xff30 + u16::try_from(index).expect("wave RAM index fits in u16"),
+                value,
+            );
+        }
+        wave.write(0, 0x80, true);
+        wave.write(3, 0xfe, true);
+        wave.write(4, 0x87, true);
+
+        for _ in 0..20 {
+            wave.tick_t_cycle();
+        }
+        wave.write(4, 0x87, true);
+        wave.write(0, 0, true);
+
+        assert_eq!(wave.read_wave_ram(0xff30), 0x12);
     }
 }

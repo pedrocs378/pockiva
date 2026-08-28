@@ -345,6 +345,67 @@ fn sweep_applies_then_checks_the_next_overflow() {
 }
 
 #[test]
+fn sweep_shift_zero_skips_trigger_calculation_but_clocks_normally() {
+    let mut sweep = FrequencySweep::default();
+    assert!(!sweep.write(0x10));
+    assert_eq!(sweep.trigger(0x7ff), SweepTrigger::Enabled);
+    assert_eq!(sweep.clock(), SweepClock::Disabled);
+}
+
+#[test]
+fn sweep_shift_zero_checks_overflow_without_updating_shadow_frequency() {
+    let mut sweep = FrequencySweep::default();
+    assert!(!sweep.write(0x10));
+    assert_eq!(sweep.trigger(0x3ff), SweepTrigger::Enabled);
+    assert_eq!(sweep.clock(), SweepClock::Idle);
+
+    assert!(!sweep.write(0x11));
+    assert_eq!(sweep.clock(), SweepClock::AppliedAndDisabled(0x5fe));
+}
+
+#[test]
+fn sweep_shift_zero_records_negate_calculation() {
+    let mut sweep = FrequencySweep::default();
+    assert!(!sweep.write(0x10));
+    assert_eq!(sweep.trigger(0), SweepTrigger::Enabled);
+    assert_eq!(sweep.clock(), SweepClock::Idle);
+
+    assert!(!sweep.write(0x18));
+    assert_eq!(sweep.clock(), SweepClock::Idle);
+    assert!(sweep.write(0x10));
+}
+
+#[test]
+fn sweep_period_zero_reloads_timer_without_calculating() {
+    let mut sweep = FrequencySweep::default();
+    assert!(!sweep.write(0x01));
+    assert_eq!(sweep.trigger(0x555), SweepTrigger::Enabled);
+
+    for _ in 0..32 {
+        assert_eq!(sweep.clock(), SweepClock::Idle);
+    }
+}
+
+#[test]
+fn sweep_period_zero_timer_keeps_running_after_period_changes() {
+    let mut sweep = FrequencySweep::default();
+    assert!(!sweep.write(0x11));
+    assert_eq!(sweep.trigger(0x200), SweepTrigger::Enabled);
+    assert_eq!(sweep.clock(), SweepClock::Applied(0x300));
+
+    assert!(!sweep.write(0x01));
+    for _ in 0..3 {
+        assert_eq!(sweep.clock(), SweepClock::Idle);
+    }
+
+    assert!(!sweep.write(0x11));
+    for _ in 0..5 {
+        assert_eq!(sweep.clock(), SweepClock::Idle);
+    }
+    assert_eq!(sweep.clock(), SweepClock::Applied(0x480));
+}
+
+#[test]
 fn sweep_trigger_overflow_and_negate_clear_disable_channel() {
     let mut overflow = FrequencySweep::default();
     assert!(!overflow.write(0x11));
@@ -354,14 +415,6 @@ fn sweep_trigger_overflow_and_negate_clear_disable_channel() {
     assert!(!negate.write(0x19));
     assert_eq!(negate.trigger(0x100), SweepTrigger::Enabled);
     assert!(negate.write(0x11));
-
-    let mut period_zero = FrequencySweep::default();
-    assert!(!period_zero.write(0x01));
-    assert_eq!(period_zero.trigger(0x200), SweepTrigger::Enabled);
-    for _ in 0..7 {
-        assert_eq!(period_zero.clock(), SweepClock::Idle);
-    }
-    assert_eq!(period_zero.clock(), SweepClock::Applied(0x300));
 
     let mut negate = FrequencySweep::default();
     assert!(!negate.write(0x19));
@@ -379,8 +432,8 @@ fn wave_playback_advances_nibbles_and_scales_level() {
     wave.write(2, 0x20, true);
     wave.write(3, 0xff, true);
     wave.write(4, 0x87, true);
-    assert_eq!(wave.output(), 1);
-    for _ in 0..2 {
+    assert_eq!(wave.output(), 0);
+    for _ in 0..8 {
         wave.tick_t_cycle();
     }
     assert_eq!(wave.output(), 2);
@@ -394,11 +447,15 @@ fn wave_playback_advances_nibbles_and_scales_level() {
 fn wave_output_level_matrix_and_active_ram_access_window() {
     for (level, expected) in [(0, 0), (1, 12), (2, 6), (3, 3)] {
         let mut wave = WaveChannel::default();
-        wave.write_wave_ram(0xff30, 0xc0);
+        wave.write_wave_ram(0xff30, 0x0c);
         wave.write(0, 0x80, true);
         wave.write(2, level << 5, true);
         wave.write(3, 0xff, true);
         wave.write(4, 0x87, true);
+        assert_eq!(wave.output(), 0, "initial output level {level}");
+        for _ in 0..8 {
+            wave.tick_t_cycle();
+        }
         assert_eq!(wave.output(), expected, "output level {level}");
     }
 
@@ -411,14 +468,14 @@ fn wave_output_level_matrix_and_active_ram_access_window() {
     wave.write(4, 0x87, true);
     assert_eq!(wave.read_wave_ram(0xff30), 0xff);
     wave.write_wave_ram(0xff30, 0x99);
-    for _ in 0..4 {
+    for _ in 0..6 {
         wave.tick_t_cycle();
     }
     assert_eq!(wave.read_wave_ram(0xff3f), 0x12);
+    for _ in 0..4 {
+        wave.tick_t_cycle();
+    }
     wave.write_wave_ram(0xff3f, 0xab);
-    assert_eq!(wave.read_wave_ram(0xff30), 0xab);
-    wave.tick_t_cycle();
-    assert_eq!(wave.read_wave_ram(0xff3f), 0xab);
     wave.tick_t_cycle();
     assert_eq!(wave.read_wave_ram(0xff30), 0xff);
     wave.write_wave_ram(0xff3f, 0xcd);
@@ -445,7 +502,7 @@ fn wave_retrigger_corrupts_current_byte_or_aligned_block() {
     current_byte.write(2, 0x20, true);
     current_byte.write(3, 0xff, true);
     current_byte.write(4, 0x87, true);
-    for _ in 0..8 {
+    for _ in 0..12 {
         current_byte.tick_t_cycle();
     }
     current_byte.write(4, 0x87, true);
@@ -463,7 +520,7 @@ fn wave_retrigger_corrupts_current_byte_or_aligned_block() {
     aligned_block.write(2, 0x20, true);
     aligned_block.write(3, 0xff, true);
     aligned_block.write(4, 0x87, true);
-    for _ in 0..16 {
+    for _ in 0..20 {
         aligned_block.tick_t_cycle();
     }
     aligned_block.write(4, 0x87, true);

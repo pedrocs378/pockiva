@@ -60,17 +60,20 @@ impl FrequencySweep {
             return SweepClock::Idle;
         }
         self.timer = self.reload_period();
-        if self.shift == 0 {
+        if self.pace == 0 {
             return SweepClock::Idle;
         }
         let Some(frequency) = self.calculate() else {
             self.enabled = false;
             return SweepClock::Disabled;
         };
-        self.shadow_frequency = frequency;
         if self.negate {
             self.negate_used = true;
         }
+        if self.shift == 0 {
+            return SweepClock::Idle;
+        }
+        self.shadow_frequency = frequency;
         if self.calculate().is_none() {
             self.enabled = false;
             SweepClock::AppliedAndDisabled(frequency)

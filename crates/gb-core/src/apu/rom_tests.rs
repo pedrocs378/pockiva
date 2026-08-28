@@ -42,16 +42,32 @@ fn verify_asset(path: &Path, expected_sha256: &str) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-fn diagnostic_text(core: &GameBoy<FixedClock>) -> Result<String, String> {
-    let mut bytes = Vec::new();
-    for offset in 0..4_096_u16 {
-        let byte = core.diagnostic_read(0xa004_u16.wrapping_add(offset));
-        if byte == 0 {
-            break;
-        }
-        bytes.push(byte);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MemoryVerdict {
+    Pending,
+    Passed,
+    Failed(u8),
+}
+
+fn memory_verdict(signature: [u8; 3], status: u8, output: &str) -> MemoryVerdict {
+    if signature != [0xde, 0xb0, 0x61] {
+        return MemoryVerdict::Pending;
     }
-    String::from_utf8(bytes).map_err(|error| format!("Blargg result text is not UTF-8: {error}"))
+    if status == 0 && output.contains("Passed") {
+        MemoryVerdict::Passed
+    } else if status != 0 && status != 0x80 {
+        MemoryVerdict::Failed(status)
+    } else {
+        MemoryVerdict::Pending
+    }
+}
+
+fn diagnostic_text(core: &GameBoy<FixedClock>) -> String {
+    let bytes = (0..4_096_u16)
+        .map(|offset| core.diagnostic_read(0xa004 + offset))
+        .take_while(|byte| *byte != 0)
+        .collect::<Vec<_>>();
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 fn run_dmg_sound(path: &Path, expected_sha256: &str, max_t_cycles: u64) -> Result<(), String> {
@@ -76,43 +92,65 @@ fn run_dmg_sound(path: &Path, expected_sha256: &str, max_t_cycles: u64) -> Resul
             .map_err(|error| error.to_string())?;
         elapsed += u64::from(cycles);
 
-        let magic = [
+        let signature = [
             core.diagnostic_read(0xa001),
             core.diagnostic_read(0xa002),
             core.diagnostic_read(0xa003),
         ];
-        if magic != [0xde, 0xb0, 0x61] {
-            continue;
-        }
-        match core.diagnostic_read(0xa000) {
-            0x80 => {
-                let text = diagnostic_text(&core)?;
-                if text.contains("Failed") {
-                    return Err(format!(
-                        "Blargg reported failure after {elapsed} T-cycles: {text}"
-                    ));
-                }
-            }
-            0x00 => {
-                let text = diagnostic_text(&core)?;
-                if text.contains("Passed") {
-                    return Ok(());
-                }
+        let status = core.diagnostic_read(0xa000);
+        let memory = if signature == [0xde, 0xb0, 0x61] && status != 0x80 {
+            diagnostic_text(&core)
+        } else {
+            String::new()
+        };
+        match memory_verdict(signature, status, &memory) {
+            MemoryVerdict::Pending => {}
+            MemoryVerdict::Passed => return Ok(()),
+            MemoryVerdict::Failed(result_code) => {
                 return Err(format!(
-                    "Blargg ended without Passed after {elapsed} T-cycles: {text}"
-                ));
-            }
-            status => {
-                let text = diagnostic_text(&core)?;
-                return Err(format!(
-                    "Blargg reported status {status:#04x} after {elapsed} T-cycles: {text}"
+                    "Blargg reported failure code {result_code} after {elapsed} T-cycles: {memory}"
                 ));
             }
         }
     }
+    let signature = [
+        core.diagnostic_read(0xa001),
+        core.diagnostic_read(0xa002),
+        core.diagnostic_read(0xa003),
+    ];
+    let status = core.diagnostic_read(0xa000);
+    let memory = diagnostic_text(&core);
+    let serial = String::from_utf8_lossy(core.serial_output());
+    let registers = (0xff10..=0xff26)
+        .map(|address| core.diagnostic_read(address))
+        .collect::<Vec<_>>();
     Err(format!(
-        "Blargg dmg_sound timed out at the exact {max_t_cycles} T-cycle bound"
+        "Blargg dmg_sound timed out at the exact {max_t_cycles} T-cycle bound: status={status:#04x}, signature={signature:02x?}, memory={memory:?}, serial={serial:?}, NR10-NR26={registers:02x?}"
     ))
+}
+
+#[test]
+fn memory_verdict_ignores_transitional_and_incomplete_results() {
+    assert_eq!(
+        memory_verdict([0xde, 0xb0, 0x61], 0, ""),
+        MemoryVerdict::Pending
+    );
+    assert_eq!(
+        memory_verdict([0xde, 0xb0, 0x61], 0x80, "dmg_sound\n01:ok"),
+        MemoryVerdict::Pending
+    );
+    assert_eq!(
+        memory_verdict([0xde, 0xb0, 0x61], 0, "dmg_sound\nPassed"),
+        MemoryVerdict::Passed
+    );
+    assert_eq!(
+        memory_verdict([0xde, 0xb0, 0x61], 3, ""),
+        MemoryVerdict::Failed(3)
+    );
+    assert_eq!(
+        memory_verdict([0, 0, 0], 0, "Passed"),
+        MemoryVerdict::Pending
+    );
 }
 
 #[test]
