@@ -32,7 +32,7 @@ Rejection reasons are `invalid-token`, `unsupported-version`, `controller-alread
 - The browser loads the controller assets over HTTP from the pairing origin and opens `/controller` on that same host and port using `ws:` or `wss:` as appropriate.
 - The first WebSocket text frame must be `hello`. The server allows five seconds for this handshake and rejects binary or malformed frames.
 - After `welcome`, `button-down`, `button-up`, `state-sync`, and `ping` share one contiguous sequence. The successor of `Number.MAX_SAFE_INTEGER` is `0`, so wraparound remains safe in JavaScript.
-- Text messages and WebSocket frames are limited to 4,096 bytes before parsing or allocation beyond that bound.
+- Application text is limited to 4,096 bytes before JSON parsing. The WebSocket decoder permits one additional sentinel byte so a 4,097-byte payload can receive `rejected: malformed-message`; payloads beyond that tightly bounded sentinel close at the transport layer.
 - Production applies a token bucket of 240 accepted messages per second with a burst capacity of 64.
 - Every valid authenticated message refreshes an absolute server deadline of 18 seconds. `ping` participates in the same sequence and receives a matching `pong`.
 - If an `Origin` header is present, it must exactly match the advertised HTTP pairing origin.

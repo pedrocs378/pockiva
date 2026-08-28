@@ -480,12 +480,32 @@ async fn rejects_oversized_binary_malformed_and_out_of_order_messages() {
         .send(Message::Text("x".repeat(4_097).into()))
         .await
         .expect("send oversized frame");
+    assert_eq!(
+        next_json(&mut oversized).await,
+        serde_json::json!({"type":"rejected","reason":"malformed-message"})
+    );
     let terminal = tokio::time::timeout(Duration::from_secs(1), oversized.next())
         .await
-        .expect("transport rejects oversized frame promptly");
+        .expect("server closes after rejecting oversized frame");
     assert!(
         matches!(terminal, None | Some(Err(_) | Ok(Message::Close(_)))),
-        "oversized frame must be rejected by the websocket transport before text parsing: {terminal:?}"
+        "oversized frame must close after the protocol rejection: {terminal:?}"
+    );
+    let _ = wait_for_event_count(&sink, event_count_before_connection + 2).await;
+
+    let event_count_before_connection = sink.events().len();
+    let mut beyond_transport_bound = connect_controller(&pairing.pairing_url).await;
+    authenticate(&mut beyond_transport_bound, &token).await;
+    beyond_transport_bound
+        .send(Message::Text("x".repeat(4_098).into()))
+        .await
+        .expect("send frame beyond transport bound");
+    let terminal = tokio::time::timeout(Duration::from_secs(1), beyond_transport_bound.next())
+        .await
+        .expect("transport closes a frame beyond its bound promptly");
+    assert!(
+        matches!(terminal, None | Some(Err(_) | Ok(Message::Close(_)))),
+        "frame beyond transport bound must close before application parsing: {terminal:?}"
     );
     let _ = wait_for_event_count(&sink, event_count_before_connection + 2).await;
 

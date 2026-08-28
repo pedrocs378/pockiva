@@ -10,7 +10,7 @@ name = "gameboy_desktop"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [features]
-integration-test-support = []
+integration-test-support = ["gb-network/integration-test-support"]
 
 [lints]
 workspace = true

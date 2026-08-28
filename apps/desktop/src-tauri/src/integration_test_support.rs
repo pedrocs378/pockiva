@@ -4,6 +4,8 @@ use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use gb_core::InputSourceId;
+
 pub use crate::emulator::contracts::{RuntimeButton, RuntimePhase, RuntimeResult, RuntimeSnapshot};
 pub use crate::emulator::runtime::{CoreFactory, RuntimeCore};
 
@@ -11,6 +13,11 @@ use crate::audio::{AudioBackendError, AudioBackendErrorKind, AudioOutput, AudioO
 use crate::emulator::runtime::DesktopRuntime;
 use crate::remote::contracts as remote_contracts;
 use crate::remote::manager::RemoteSessionManager;
+
+/// Keyboard input source used by the desktop runtime.
+pub const KEYBOARD_INPUT_SOURCE: InputSourceId = crate::emulator::contracts::KEYBOARD_INPUT_SOURCE;
+/// Remote controller input source used by the desktop runtime.
+pub const REMOTE_INPUT_SOURCE: InputSourceId = crate::emulator::contracts::REMOTE_INPUT_SOURCE;
 
 /// Observable remote-session lifecycle exposed only to integration tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

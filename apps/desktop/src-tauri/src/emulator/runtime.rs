@@ -14,8 +14,8 @@ use gb_core::{
 use gb_network::{Button as NetworkButton, ClientMessage, ControllerConnectionId, ControllerEvent};
 
 use super::contracts::{
-    RomSummary, RuntimeButton, RuntimeError, RuntimeErrorCode, RuntimeEvent, RuntimePhase,
-    RuntimeResult, RuntimeSnapshot,
+    KEYBOARD_INPUT_SOURCE, REMOTE_INPUT_SOURCE, RomSummary, RuntimeButton, RuntimeError,
+    RuntimeErrorCode, RuntimeEvent, RuntimePhase, RuntimeResult, RuntimeSnapshot,
 };
 use crate::audio::{
     AudioBackendError, AudioOutput, AudioOutputFactory, PacingDecision, pacing_decision,
@@ -33,9 +33,6 @@ const MAX_PRIME_BATCHES: usize = 4;
 const CONTROLLER_QUEUE_RETRY_INTERVAL: Duration = Duration::from_millis(1);
 #[cfg_attr(not(test), allow(dead_code))]
 const CONTROLLER_QUEUE_RETRY_TIMEOUT: Duration = Duration::from_millis(100);
-const KEYBOARD_INPUT_SOURCE: InputSourceId = InputSourceId::new(1);
-const REMOTE_INPUT_SOURCE: InputSourceId = InputSourceId::new(2);
-
 struct CurrentController {
     connection_id: ControllerConnectionId,
     generation: u64,

@@ -6,9 +6,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant};
 
-use gb_core::InputSourceId;
-#[cfg(feature = "integration-test-support")]
-use gb_network::OsSessionEntropy;
 use gb_network::{
     ControllerEvent, ControllerEventSink, ControllerEventSinkError, ControllerServer, NetworkError,
     PairingInfo, SessionServerConfig,
@@ -18,9 +15,9 @@ use super::contracts::{
     RemoteError, RemoteErrorCode, RemoteEvent, RemoteLatency, RemotePhase, RemoteResult,
     RemoteSnapshot,
 };
+use crate::emulator::contracts::REMOTE_INPUT_SOURCE;
 use crate::emulator::runtime::DesktopRuntimeHandle;
 
-const REMOTE_INPUT_SOURCE: InputSourceId = InputSourceId::new(2);
 const MAX_LATENCY_SAMPLES: usize = 128;
 
 /// Receives ordered snapshots.
@@ -87,15 +84,11 @@ impl ControllerServerFactory for LoopbackControllerServerFactory {
         controller_assets: PathBuf,
         sink: Arc<dyn ControllerEventSink>,
     ) -> Result<(Box<dyn RunningControllerServer>, PairingInfo), NetworkError> {
-        let config = SessionServerConfig {
-            bind_address: IpAddr::V4(Ipv4Addr::LOCALHOST),
+        let config = SessionServerConfig::for_bind_address(
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
             controller_assets,
-            input_source: REMOTE_INPUT_SOURCE,
-            token_ttl: Duration::from_secs(600),
-            heartbeat_timeout: Duration::from_secs(18),
-            input_rate_per_second: 240,
-            entropy: Arc::new(OsSessionEntropy),
-        };
+            REMOTE_INPUT_SOURCE,
+        );
         let (server, pairing) = ControllerServer::start(config, sink)?;
         Ok((Box::new(server), pairing))
     }

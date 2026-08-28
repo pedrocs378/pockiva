@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
 use gameboy_desktop::integration_test_support::{
-    CoreFactory, RemotePhase, RemoteRuntimeHarness, RuntimeButton, RuntimeCore, RuntimePhase,
+    CoreFactory, KEYBOARD_INPUT_SOURCE, REMOTE_INPUT_SOURCE, RemotePhase, RemoteRuntimeHarness,
+    RuntimeButton, RuntimeCore, RuntimePhase,
 };
 use gb_core::{
     AudioBatch, BatteryState, Button, CartridgeMetadata, CompatibilityMode, CoreError, Frame,
@@ -194,7 +195,7 @@ async fn real_websocket_protocol_drives_runtime_reconnects_and_stays_bounded() {
     sequence += 1;
     ping_barrier(&mut active, sequence).await;
     sequence += 1;
-    wait_for_input(&recording, InputSourceId::new(2), |state| {
+    wait_for_input(&recording, REMOTE_INPUT_SOURCE, |state| {
         state.is_pressed(Button::Left) && state.is_pressed(Button::A)
     })
     .await;
@@ -202,7 +203,7 @@ async fn real_websocket_protocol_drives_runtime_reconnects_and_stays_bounded() {
         recording
             .lock()
             .expect("recording state")
-            .input(InputSourceId::new(1))
+            .input(KEYBOARD_INPUT_SOURCE)
             .expect("keyboard state")
             .is_pressed(Button::A)
     );
@@ -225,7 +226,7 @@ async fn real_websocket_protocol_drives_runtime_reconnects_and_stays_bounded() {
     sequence += 1;
     ping_barrier(&mut active, sequence).await;
     sequence += 1;
-    wait_for_input(&recording, InputSourceId::new(2), |state| {
+    wait_for_input(&recording, REMOTE_INPUT_SOURCE, |state| {
         state.is_pressed(Button::B)
     })
     .await;
@@ -248,7 +249,7 @@ async fn real_websocket_protocol_drives_runtime_reconnects_and_stays_bounded() {
     let remote_applications_before = recording
         .lock()
         .expect("recording state")
-        .application_count(InputSourceId::new(2));
+        .application_count(REMOTE_INPUT_SOURCE);
     for transition in 0..200_u64 {
         let message_type = if transition % 2 == 0 {
             "button-down"
@@ -271,7 +272,7 @@ async fn real_websocket_protocol_drives_runtime_reconnects_and_stays_bounded() {
     let remote_applications_after = recording
         .lock()
         .expect("recording state")
-        .application_count(InputSourceId::new(2));
+        .application_count(REMOTE_INPUT_SOURCE);
     assert_eq!(
         remote_applications_after.checked_sub(remote_applications_before),
         Some(200),
@@ -291,16 +292,16 @@ async fn real_websocket_protocol_drives_runtime_reconnects_and_stays_bounded() {
 
     drop(active);
     wait_for_remote_phase(&harness, RemotePhase::Waiting).await;
-    wait_for_missing_input(&recording, InputSourceId::new(2)).await;
+    wait_for_missing_input(&recording, REMOTE_INPUT_SOURCE).await;
     {
         let state = recording.lock().expect("recording state");
         assert!(
             state
-                .input(InputSourceId::new(1))
+                .input(KEYBOARD_INPUT_SOURCE)
                 .expect("keyboard remains active")
                 .is_pressed(Button::A)
         );
-        assert_eq!(state.clear_count(InputSourceId::new(2)), 1);
+        assert_eq!(state.clear_count(REMOTE_INPUT_SOURCE), 1);
     }
     assert_eq!(
         harness.runtime_snapshot().expect("runtime snapshot").phase,
@@ -315,7 +316,7 @@ async fn real_websocket_protocol_drives_runtime_reconnects_and_stays_bounded() {
     )
     .await;
     ping_barrier(&mut reconnected, 1).await;
-    wait_for_input(&recording, InputSourceId::new(2), |state| {
+    wait_for_input(&recording, REMOTE_INPUT_SOURCE, |state| {
         state.is_pressed(Button::Down)
             && state.is_pressed(Button::B)
             && !state.is_pressed(Button::Left)
@@ -325,16 +326,16 @@ async fn real_websocket_protocol_drives_runtime_reconnects_and_stays_bounded() {
 
     let off = harness.end_remote().expect("explicit session end");
     assert_eq!(off.phase, RemotePhase::Off);
-    wait_for_missing_input(&recording, InputSourceId::new(2)).await;
+    wait_for_missing_input(&recording, REMOTE_INPUT_SOURCE).await;
     {
         let state = recording.lock().expect("recording state");
         assert!(
             state
-                .input(InputSourceId::new(1))
+                .input(KEYBOARD_INPUT_SOURCE)
                 .expect("keyboard survives explicit end")
                 .is_pressed(Button::A)
         );
-        assert_eq!(state.clear_count(InputSourceId::new(2)), 2);
+        assert_eq!(state.clear_count(REMOTE_INPUT_SOURCE), 2);
     }
     let old_token_connection = tokio::time::timeout(
         Duration::from_secs(1),

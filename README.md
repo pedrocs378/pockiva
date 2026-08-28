@@ -35,7 +35,7 @@ No ROM files are bundled. Do not add commercial ROMs to this repository.
 - [Testing strategy](docs/testing/strategy.md)
 - [ROM asset policy](docs/testing/rom-assets.md)
 
-The current foundation compiles shells and freezes contracts; it does not yet implement emulation, live ROM lifecycle, or a listening controller server.
+The workspace now includes emulation, live ROM lifecycle, desktop audio/video output, and a LAN controller server. See the architecture documents above for the current runtime and protocol boundaries.
 
 ## Continuous integration
 

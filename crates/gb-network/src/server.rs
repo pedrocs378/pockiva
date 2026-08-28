@@ -30,6 +30,9 @@ use crate::{
 const TOKEN_BYTES: usize = 32;
 const IDENTIFIER_BYTES: usize = 16;
 const MAX_TEXT_BYTES: usize = 4_096;
+// The sentinel byte lets the application reject the first oversized payload without allowing
+// the WebSocket decoder to allocate beyond a tightly bounded frame or message.
+const MAX_TRANSPORT_PAYLOAD_BYTES: usize = MAX_TEXT_BYTES + 1;
 const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
 const PRODUCTION_TOKEN_TTL: Duration = Duration::from_mins(10);
 const PRODUCTION_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(18);
@@ -99,15 +102,38 @@ impl SessionServerConfig {
         controller_assets: PathBuf,
         input_source: InputSourceId,
     ) -> Result<Self, NetworkError> {
-        Ok(Self {
-            bind_address: discover_lan_ipv4()?,
+        Ok(Self::with_bind_address(
+            discover_lan_ipv4()?,
+            controller_assets,
+            input_source,
+        ))
+    }
+
+    /// Creates a server configuration with production policy for an explicit bind address.
+    #[must_use]
+    #[cfg(feature = "integration-test-support")]
+    pub fn for_bind_address(
+        bind_address: IpAddr,
+        controller_assets: PathBuf,
+        input_source: InputSourceId,
+    ) -> Self {
+        Self::with_bind_address(bind_address, controller_assets, input_source)
+    }
+
+    fn with_bind_address(
+        bind_address: IpAddr,
+        controller_assets: PathBuf,
+        input_source: InputSourceId,
+    ) -> Self {
+        Self {
+            bind_address,
             controller_assets,
             input_source,
             token_ttl: PRODUCTION_TOKEN_TTL,
             heartbeat_timeout: PRODUCTION_HEARTBEAT_TIMEOUT,
             input_rate_per_second: RATE_PER_SECOND,
             entropy: Arc::new(OsSessionEntropy),
-        })
+        }
     }
 }
 
@@ -354,8 +380,8 @@ async fn upgrade_controller(
     state.socket_tasks.fetch_add(1, Ordering::AcqRel);
     let failed_upgrade_state = state.clone();
     upgrade
-        .max_message_size(MAX_TEXT_BYTES)
-        .max_frame_size(MAX_TEXT_BYTES)
+        .max_message_size(MAX_TRANSPORT_PAYLOAD_BYTES)
+        .max_frame_size(MAX_TRANSPORT_PAYLOAD_BYTES)
         .on_failed_upgrade(move |_error: axum::Error| {
             finish_socket_task(&failed_upgrade_state);
         })

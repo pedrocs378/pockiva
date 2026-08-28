@@ -1,5 +1,8 @@
-use gb_core::{CartridgeMetadata, CompatibilityMode, CoreError, MapperKind};
+use gb_core::{CartridgeMetadata, CompatibilityMode, CoreError, InputSourceId, MapperKind};
 use serde::{Deserialize, Serialize};
+
+pub(crate) const KEYBOARD_INPUT_SOURCE: InputSourceId = InputSourceId::new(1);
+pub(crate) const REMOTE_INPUT_SOURCE: InputSourceId = InputSourceId::new(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
