@@ -30,6 +30,7 @@ jobs:
             curl \
             file \
             libayatana-appindicator3-dev \
+            libasound2-dev \
             librsvg2-dev \
             libssl-dev \
             libwebkit2gtk-4.1-dev \
@@ -100,6 +101,7 @@ jobs:
       - name: Install dependencies and build frontend
         run: |
           pnpm install --frozen-lockfile
+          pnpm --filter @gameboy/remote-controller build
           pnpm --filter @gameboy/desktop build
 
       - name: Check Tauri crate
@@ -132,6 +134,7 @@ jobs:
         shell: pwsh
         run: |
           pnpm install --frozen-lockfile
+          pnpm --filter @gameboy/remote-controller build
           pnpm --filter @gameboy/desktop build
 
       - name: Check Tauri crate
