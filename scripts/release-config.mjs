@@ -12,10 +12,20 @@ const privateKeyMarkers = [
   'untrusted comment: minisign secret key'
 ]
 
-const parseVersion = (version, label) => {
+export const parseStableVersion = (version, label) => {
   const match = stableSemver.exec(version)
   if (!match) throw new Error(`${label} must be a stable SemVer value, received ${JSON.stringify(version)}`)
   return match.slice(1).map(Number)
+}
+
+export const compareStableVersions = (left, right) => {
+  const leftParts = parseStableVersion(left, 'Left version')
+  const rightParts = parseStableVersion(right, 'Right version')
+  for (let index = 0; index < leftParts.length; index += 1) {
+    if (leftParts[index] > rightParts[index]) return 1
+    if (leftParts[index] < rightParts[index]) return -1
+  }
+  return 0
 }
 
 const cargoWorkspaceVersion = (cargoManifest) => {
@@ -45,7 +55,7 @@ export const loadRepositoryReleaseMetadata = async (root = repositoryRoot) => {
 
 export const validateReleaseMetadata = ({ tauri, desktopPackage, cargoVersion, capabilities, viteConfig }) => {
   const version = tauri.version
-  parseVersion(version, 'tauri.conf.json version')
+  parseStableVersion(version, 'tauri.conf.json version')
 
   if (desktopPackage.version !== version || cargoVersion !== version) {
     throw new Error(
@@ -76,10 +86,7 @@ export const validateReleaseMetadata = ({ tauri, desktopPackage, cargoVersion, c
 }
 
 export const assertVersionBump = (current, previous) => {
-  const currentParts = parseVersion(current, 'Current version')
-  const previousParts = parseVersion(previous, 'Previous version')
-  const comparison = currentParts.findIndex((part, index) => part !== previousParts[index])
-  if (comparison === -1 || currentParts[comparison] < previousParts[comparison]) {
+  if (compareStableVersions(current, previous) <= 0) {
     throw new Error(`Release version ${current} must be greater than main version ${previous}`)
   }
 }

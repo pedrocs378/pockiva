@@ -5,14 +5,12 @@ This runbook validates Pockiva's updater and release path without publishing a r
 ## Pre-release checks
 
 1. Confirm the release pull request is exactly `develop -> main` in `pedrocs378/pockiva`.
-2. Increase the stable SemVer value in all three manifests:
-   - `apps/desktop/src-tauri/tauri.conf.json` (canonical)
-   - `apps/desktop/package.json`
-   - `[workspace.package]` in `Cargo.toml`
-3. Run `pnpm release:check`. The check rejects mismatched or non-increasing versions, invalid updater configuration, missing capabilities, and mutable action references.
-4. Run the complete repository verification documented in `AGENTS.md`.
-5. Confirm the GitHub `release` environment is restricted to `main` and contains both updater signing secret names. Never print their values.
-6. Merge the release pull request with a merge commit. Do not squash `develop -> main`, because the merged commit is the immutable release source.
+2. Choose one bump for the delivery into `develop`: `patch` for fixes, documentation, CI, refactors, and small compatible changes; `minor` for compatible user-facing capabilities; or `major` for incompatible behavior after `1.0.0`. In `0.x`, incompatible behavior advances `minor`. For a complex task, only its final parent pull request bumps.
+3. Run exactly one atomic command: `pnpm version:bump patch`, `pnpm version:bump minor`, or `pnpm version:bump major`. It updates the canonical Tauri version, desktop package, Cargo workspace version, and the inherited `gameboy-desktop`, `gb-core`, and `gb-network` entries in `Cargo.lock` together.
+4. Review the four changed version files and run `pnpm release:check`. The check rejects mismatched or non-increasing versions, invalid updater configuration, missing capabilities, and mutable action references.
+5. Run the complete repository verification documented in `AGENTS.md`.
+6. Confirm the GitHub `release` environment is restricted to `main` and contains both updater signing secret names. Never print their values.
+7. Merge the release pull request with a merge commit. Do not squash `develop -> main`, because the merged commit is the immutable release source.
 
 ## Expected artifacts
 
