@@ -6,6 +6,7 @@ use crate::interrupts::Interrupt;
 
 pub(crate) struct StepResult {
     pub(crate) t_cycles: u32,
+    #[cfg(test)]
     pub(crate) debug_breakpoint: bool,
 }
 
@@ -50,6 +51,7 @@ pub(super) fn step(cpu: &mut Cpu, bus: &mut impl CpuBus) -> Result<StepResult, C
         );
         return Ok(StepResult {
             t_cycles: elapsed(bus, start),
+            #[cfg(test)]
             debug_breakpoint: false,
         });
     }
@@ -57,6 +59,7 @@ pub(super) fn step(cpu: &mut Cpu, bus: &mut impl CpuBus) -> Result<StepResult, C
         if pending.bits() == 0 {
             return Ok(StepResult {
                 t_cycles: 0,
+                #[cfg(test)]
                 debug_breakpoint: false,
             });
         }
@@ -67,6 +70,7 @@ pub(super) fn step(cpu: &mut Cpu, bus: &mut impl CpuBus) -> Result<StepResult, C
             bus.idle_m_cycle();
             return Ok(StepResult {
                 t_cycles: elapsed(bus, start),
+                #[cfg(test)]
                 debug_breakpoint: false,
             });
         }
@@ -75,7 +79,6 @@ pub(super) fn step(cpu: &mut Cpu, bus: &mut impl CpuBus) -> Result<StepResult, C
 
     let opcode_address = cpu.registers.pc;
     let opcode = fetch8(cpu, bus);
-    let mut taken = true;
     if opcode == 0xcb {
         let prefixed = fetch8(cpu, bus);
         execute_cb(cpu, bus, prefixed);
@@ -87,7 +90,7 @@ pub(super) fn step(cpu: &mut Cpu, bus: &mut impl CpuBus) -> Result<StepResult, C
                 "illegal opcode {opcode:#04x} at {opcode_address:#06x}"
             )));
         }
-        taken = execute_base(cpu, bus, opcode)?;
+        let taken = execute_base(cpu, bus, opcode)?;
         let target = if taken {
             decoded.cycles_taken
         } else {
@@ -104,7 +107,8 @@ pub(super) fn step(cpu: &mut Cpu, bus: &mut impl CpuBus) -> Result<StepResult, C
     }
     Ok(StepResult {
         t_cycles: elapsed(bus, start),
-        debug_breakpoint: opcode == 0x40 && taken,
+        #[cfg(test)]
+        debug_breakpoint: opcode == 0x40,
     })
 }
 

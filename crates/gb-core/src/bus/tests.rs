@@ -1,0 +1,80 @@
+use std::num::NonZeroU32;
+
+use super::MachineBus;
+use crate::cartridge::Cartridge;
+use crate::cpu::CpuBus;
+
+fn test_rom() -> Vec<u8> {
+    let mut rom = vec![0; 0x8000];
+    rom[0x0147] = 0;
+    rom[0x0148] = 0;
+    rom[0x0149] = 0;
+    rom[0x014d] = rom[0x0134..=0x014c]
+        .iter()
+        .fold(0_u8, |sum, byte| sum.wrapping_sub(*byte).wrapping_sub(1));
+    rom
+}
+
+fn test_bus() -> MachineBus {
+    MachineBus::new(
+        Cartridge::load(&test_rom(), None, 0).expect("test ROM loads"),
+        NonZeroU32::new(48_000).expect("non-zero"),
+        0,
+    )
+}
+
+#[test]
+fn wram_echoes_and_each_cpu_access_ticks_four_t_cycles() {
+    let mut bus = test_bus();
+    bus.write8(0xc123, 0xa5);
+    assert_eq!(bus.read8(0xe123), 0xa5);
+    assert_eq!(bus.elapsed_t_cycles(), 8);
+}
+
+#[test]
+fn memory_map_boundaries_have_dmg_open_bus_behavior() {
+    let mut bus = test_bus();
+    bus.write8(0xff80, 0x11);
+    bus.write8(0xfffe, 0x22);
+    assert_eq!(bus.read8(0xff80), 0x11);
+    assert_eq!(bus.read8(0xfffe), 0x22);
+    assert_eq!(bus.read8(0xfea0), 0xff);
+    assert_eq!(bus.read8(0xfeff), 0xff);
+    assert_eq!(bus.read8(0xff7f), 0xff);
+}
+
+#[test]
+fn oam_dma_copies_one_byte_per_machine_cycle_and_blocks_non_hram_cpu_access() {
+    let mut bus = test_bus();
+    for value in 0_u8..160 {
+        bus.write_unclocked(0xc000 + u16::from(value), value);
+    }
+    bus.write8(0xff46, 0xc0);
+    assert_eq!(bus.read8(0xc000), 0xff);
+    bus.write8(0xff80, 0x55);
+    assert_eq!(bus.read8(0xff80), 0x55);
+    while bus.dma.active() {
+        bus.idle_m_cycle();
+    }
+    for expected in 0_u8..160 {
+        assert_eq!(bus.video.read(0xfe00 + u16::from(expected)), expected);
+    }
+    assert_eq!(bus.elapsed_t_cycles(), 4 + 640);
+}
+
+#[test]
+fn serial_capture_is_bounded() {
+    let mut bus = test_bus();
+    for value in 0..4200_u16 {
+        bus.write_unclocked(0xff01, value as u8);
+        bus.write_unclocked(0xff02, 0x81);
+    }
+    assert_eq!(bus.serial_output().len(), 4096);
+}
+
+fn assert_send<T: Send>() {}
+
+#[test]
+fn complete_machine_bus_can_move_between_threads() {
+    assert_send::<MachineBus>();
+}

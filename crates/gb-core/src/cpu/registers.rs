@@ -122,8 +122,7 @@ pub(crate) fn inc8(value: u8, carry: bool) -> (u8, Flags) {
 
 pub(crate) fn dec8(value: u8, carry: bool) -> (u8, Flags) {
     let result = value.wrapping_sub(1);
-    let mut flags = Flags::N;
-    flags.set(Flags::C, carry);
+    let mut flags = Flags::N.union(if carry { Flags::C } else { Flags::default() });
     flags.set(Flags::Z, result == 0);
     flags.set(Flags::H, value & 0x0f == 0);
     (result, flags)

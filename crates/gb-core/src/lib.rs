@@ -4,6 +4,9 @@ mod bus;
 mod cartridge;
 mod cpu;
 mod interrupts;
+mod joypad;
+mod machine;
+mod timer;
 
 pub mod contracts;
 
@@ -12,6 +15,7 @@ pub use contracts::{
     EmulatorCore, Frame, InputSourceId, JoypadState, MapperKind, RunOutcome, SCREEN_HEIGHT,
     SCREEN_WIDTH,
 };
+pub use machine::GameBoy;
 
 pub const DMG_CLOCK_HZ: u32 = 4_194_304;
 pub const T_CYCLES_PER_M_CYCLE: u32 = 4;
