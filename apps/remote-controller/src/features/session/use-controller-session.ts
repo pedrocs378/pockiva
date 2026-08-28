@@ -36,11 +36,9 @@ export const useControllerSession = (
     () => (pairing.status === 'ready' ? new ControllerSession({ pairing: pairing.config, transport }) : null),
     [pairing, transport]
   )
-  const snapshot = useSyncExternalStore(
-    session?.subscribe ?? subscribeMissing,
-    session?.getSnapshot ?? getMissingSnapshot,
-    session?.getSnapshot ?? getMissingSnapshot
-  )
+  const subscribe = session ? session.subscribe : subscribeMissing
+  const getSnapshot: () => SessionSnapshot | MissingTokenSnapshot = session ? session.getSnapshot : getMissingSnapshot
+  const snapshot = useSyncExternalStore<SessionSnapshot | MissingTokenSnapshot>(subscribe, getSnapshot, getSnapshot)
 
   useEffect(() => {
     session?.connect()
