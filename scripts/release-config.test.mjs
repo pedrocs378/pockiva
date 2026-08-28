@@ -6,7 +6,9 @@ import { after, describe, it } from 'node:test'
 import {
   assertBundleHasNoSigningKey,
   assertVersionBump,
+  compareStableVersions,
   loadRepositoryReleaseMetadata,
+  parseStableVersion,
   validateReleaseMetadata,
   validateReleaseWorkflow
 } from './release-config.mjs'
@@ -31,6 +33,14 @@ const validMetadata = () => ({
 })
 
 describe('release metadata', () => {
+  it('parses and compares stable SemVer numerically', () => {
+    assert.deepEqual(parseStableVersion('10.2.3', 'Version'), [10, 2, 3])
+    assert.equal(compareStableVersions('0.1.10', '0.1.9'), 1)
+    assert.equal(compareStableVersions('0.1.0', '0.1.0'), 0)
+    assert.equal(compareStableVersions('0.0.9', '0.1.0'), -1)
+    assert.throws(() => parseStableVersion('0.2.0-beta.1', 'Version'), /stable SemVer/)
+  })
+
   it('accepts one stable version and the signed public updater contract', () => {
     assert.equal(validateReleaseMetadata(validMetadata()), '0.1.0')
   })
@@ -53,7 +63,7 @@ describe('release metadata', () => {
 
   it('validates the committed repository metadata', async () => {
     const metadata = await loadRepositoryReleaseMetadata()
-    assert.equal(validateReleaseMetadata(metadata), '0.1.0')
+    assert.equal(validateReleaseMetadata(metadata), '0.1.1')
   })
 })
 

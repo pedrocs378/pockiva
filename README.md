@@ -46,10 +46,20 @@ CI runs the complete quality/test suite on Ubuntu and compiles the desktop front
 - `develop` is the default integration branch.
 - Work branches use the exact Linear issue identifier, such as `PED-32`, and merge into `develop` through pull requests.
 - `main` is reserved for releases. Only a merged pull request from `develop` may trigger the release workflow.
-- The release version follows SemVer and must be kept consistent in the Tauri configuration, desktop package, and Cargo package metadata.
+- The release version follows SemVer and must be kept consistent in the Tauri configuration, desktop package, Cargo workspace metadata, and inherited local packages in `Cargo.lock`.
 - The automated release produces signed Tauri updater artifacts for macOS Apple Silicon and Windows x64 and publishes them through GitHub Releases only after both platform builds succeed.
 
-Before opening a release pull request, increase the stable SemVer version in `apps/desktop/src-tauri/tauri.conf.json`, `apps/desktop/package.json`, and `[workspace.package]` in `Cargo.toml`, then run:
+Choose one bump for each delivery into `develop`: `patch` for fixes, documentation, CI, refactors, and small compatible changes; `minor` for backward-compatible user-facing capabilities; and `major` for incompatible behavior after `1.0.0`. While Pockiva is in `0.x`, incompatible behavior advances `minor`. A complex delivery bumps only in its final parent pull request, not in its child pull requests.
+
+Use exactly one of these commands to update all shipped version metadata atomically:
+
+```sh
+pnpm version:bump patch
+pnpm version:bump minor
+pnpm version:bump major
+```
+
+Then validate the release configuration:
 
 ```sh
 pnpm release:check
