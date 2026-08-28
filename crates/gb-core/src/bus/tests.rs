@@ -1,8 +1,90 @@
 use std::num::NonZeroU32;
+use std::sync::{Arc, Mutex};
 
 use super::MachineBus;
+use super::devices::{AudioDevice, TickEffects, VideoDevice};
 use crate::cartridge::Cartridge;
 use crate::cpu::CpuBus;
+use crate::{AudioBatch, Frame, JoypadState};
+
+#[derive(Debug, Default)]
+struct AudioSpyState {
+    tick_calls: Vec<u32>,
+    writes: Vec<(u16, u8)>,
+}
+
+struct AudioSpy {
+    state: Arc<Mutex<AudioSpyState>>,
+}
+
+impl AudioDevice for AudioSpy {
+    fn read(&self, _address: u16) -> u8 {
+        0xff
+    }
+
+    fn write(&mut self, address: u16, value: u8) {
+        self.state
+            .lock()
+            .expect("audio spy lock is available")
+            .writes
+            .push((address, value));
+    }
+
+    fn tick(&mut self, t_cycles: u32) -> TickEffects {
+        self.state
+            .lock()
+            .expect("audio spy lock is available")
+            .tick_calls
+            .push(t_cycles);
+        TickEffects::default()
+    }
+
+    fn stereo_frames_available(&self) -> usize {
+        0
+    }
+
+    fn drain_audio(&mut self) -> AudioBatch {
+        AudioBatch::empty(NonZeroU32::new(48_000).expect("non-zero sample rate"))
+    }
+}
+
+#[derive(Debug, Default)]
+struct VideoSpyState {
+    tick_calls: Vec<u32>,
+}
+
+struct VideoSpy {
+    state: Arc<Mutex<VideoSpyState>>,
+}
+
+impl VideoDevice for VideoSpy {
+    fn read(&self, _address: u16) -> u8 {
+        0xff
+    }
+
+    fn write(&mut self, _address: u16, _value: u8) -> TickEffects {
+        TickEffects::default()
+    }
+
+    fn dma_write_oam(&mut self, _index: u8, _value: u8) {}
+
+    fn tick(&mut self, t_cycles: u32) -> TickEffects {
+        self.state
+            .lock()
+            .expect("video spy lock is available")
+            .tick_calls
+            .push(t_cycles);
+        TickEffects::default()
+    }
+
+    fn frame_ready(&self) -> bool {
+        false
+    }
+
+    fn take_frame(&mut self) -> Option<Frame> {
+        None
+    }
+}
 
 fn test_rom() -> Vec<u8> {
     let mut rom = vec![0; 0x8000];
@@ -21,6 +103,115 @@ fn test_bus() -> MachineBus {
         NonZeroU32::new(48_000).expect("non-zero"),
         0,
     )
+}
+
+fn trigger_channel_one_with_one_length_clock_remaining(bus: &mut MachineBus) {
+    bus.write_unclocked(0xff11, 0x3f);
+    bus.write_unclocked(0xff12, 0xf0);
+    bus.write_unclocked(0xff14, 0xc0);
+    assert_ne!(bus.read_unclocked(0xff26) & 0x01, 0);
+}
+
+#[test]
+fn each_machine_cycle_ticks_audio_and_video_by_four_t_cycles() {
+    let mut bus = test_bus();
+    let audio_state = Arc::new(Mutex::new(AudioSpyState::default()));
+    let video_state = Arc::new(Mutex::new(VideoSpyState::default()));
+    bus.audio = Box::new(AudioSpy {
+        state: Arc::clone(&audio_state),
+    });
+    bus.video = Box::new(VideoSpy {
+        state: Arc::clone(&video_state),
+    });
+
+    bus.idle_m_cycle();
+
+    assert_eq!(
+        audio_state
+            .lock()
+            .expect("audio spy lock is available")
+            .tick_calls,
+        [4]
+    );
+    assert_eq!(
+        video_state
+            .lock()
+            .expect("video spy lock is available")
+            .tick_calls,
+        [4]
+    );
+}
+
+#[test]
+fn div_write_is_forwarded_to_audio_without_changing_the_video_contract() {
+    let mut bus = test_bus();
+    let audio_state = Arc::new(Mutex::new(AudioSpyState::default()));
+    bus.audio = Box::new(AudioSpy {
+        state: Arc::clone(&audio_state),
+    });
+
+    bus.write_unclocked(0xff04, 0xab);
+
+    assert_eq!(
+        audio_state
+            .lock()
+            .expect("audio spy lock is available")
+            .writes,
+        [(0xff04, 0)]
+    );
+}
+
+#[test]
+fn real_apu_first_natural_frame_clock_occurs_at_5_172_t_cycles() {
+    let mut bus = test_bus();
+    trigger_channel_one_with_one_length_clock_remaining(&mut bus);
+
+    let _ = bus.audio.tick(5_171);
+    assert_ne!(bus.read_unclocked(0xff26) & 0x01, 0);
+
+    let _ = bus.audio.tick(1);
+    assert_eq!(bus.read_unclocked(0xff26) & 0x01, 0);
+}
+
+#[test]
+fn div_reset_clocks_audio_once_when_mirrored_bit_twelve_is_high() {
+    let mut bus = test_bus();
+    trigger_channel_one_with_one_length_clock_remaining(&mut bus);
+    let _ = bus.audio.tick(1_076);
+
+    bus.write_unclocked(0xff04, 0xff);
+    assert_eq!(bus.read_unclocked(0xff26) & 0x01, 0);
+
+    trigger_channel_one_with_one_length_clock_remaining(&mut bus);
+    bus.write_unclocked(0xff04, 0xff);
+    assert_ne!(bus.read_unclocked(0xff26) & 0x01, 0);
+}
+
+#[test]
+fn div_reset_does_not_clock_audio_when_mirrored_bit_twelve_is_low() {
+    let mut bus = test_bus();
+    trigger_channel_one_with_one_length_clock_remaining(&mut bus);
+
+    bus.write_unclocked(0xff04, 0xff);
+
+    assert_ne!(bus.read_unclocked(0xff26) & 0x01, 0);
+}
+
+#[test]
+fn machine_reset_reconstructs_timer_and_audio_from_post_boot_divider() {
+    let mut bus = test_bus();
+    for _ in 0..100 {
+        bus.idle_m_cycle();
+    }
+
+    bus.reset(42, JoypadState::default());
+
+    assert_eq!(bus.read_unclocked(0xff04), 0xab);
+    trigger_channel_one_with_one_length_clock_remaining(&mut bus);
+    let _ = bus.audio.tick(5_171);
+    assert_ne!(bus.read_unclocked(0xff26) & 0x01, 0);
+    let _ = bus.audio.tick(1);
+    assert_eq!(bus.read_unclocked(0xff26) & 0x01, 0);
 }
 
 #[test]

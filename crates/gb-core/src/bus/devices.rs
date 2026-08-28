@@ -1,5 +1,4 @@
-use std::num::NonZeroU32;
-
+use crate::apu::Apu;
 use crate::interrupts::InterruptMask;
 use crate::{AudioBatch, Frame};
 
@@ -33,43 +32,28 @@ pub(crate) trait AudioDevice: Send {
     fn drain_audio(&mut self) -> AudioBatch;
 }
 
-pub(crate) struct AudioRegisters {
-    registers: [u8; 0x30],
-    sample_rate: NonZeroU32,
-}
-
-impl AudioRegisters {
-    pub(crate) const fn new(sample_rate: NonZeroU32) -> Self {
-        Self {
-            registers: [0; 0x30],
-            sample_rate,
-        }
-    }
-}
-
-impl AudioDevice for AudioRegisters {
+impl AudioDevice for Apu {
     fn read(&self, address: u16) -> u8 {
-        self.registers
-            .get(usize::from(address.saturating_sub(0xff10)))
-            .copied()
-            .unwrap_or(0xff)
+        Apu::read(self, address)
     }
+
     fn write(&mut self, address: u16, value: u8) {
-        if let Some(register) = self
-            .registers
-            .get_mut(usize::from(address.saturating_sub(0xff10)))
-        {
-            *register = value;
-        }
+        Apu::write(self, address, value);
     }
-    fn tick(&mut self, _t_cycles: u32) -> TickEffects {
+
+    fn tick(&mut self, t_cycles: u32) -> TickEffects {
+        for _ in 0..t_cycles {
+            self.tick_t_cycle();
+        }
         TickEffects::default()
     }
+
     fn stereo_frames_available(&self) -> usize {
-        0
+        Apu::stereo_frames_available(self)
     }
+
     fn drain_audio(&mut self) -> AudioBatch {
-        AudioBatch::empty(self.sample_rate)
+        Apu::drain_audio(self)
     }
 }
 

@@ -3,6 +3,7 @@ mod dma;
 
 use std::num::NonZeroU32;
 
+use crate::apu::Apu;
 use crate::cartridge::Cartridge;
 use crate::cpu::CpuBus;
 use crate::interrupts::{Interrupt, InterruptMask, InterruptRegisters};
@@ -10,7 +11,7 @@ use crate::joypad::JoypadRegister;
 use crate::ppu::Ppu;
 use crate::timer::Timer;
 use crate::{AudioBatch, BatteryState, Frame, JoypadState};
-use devices::{AudioDevice, AudioRegisters, VideoDevice};
+use devices::{AudioDevice, VideoDevice};
 use dma::OamDma;
 
 #[derive(Default)]
@@ -75,7 +76,7 @@ impl MachineBus {
             interrupts: InterruptRegisters::default(),
             dma: OamDma::default(),
             video: Box::new(Ppu::post_boot_dmg()),
-            audio: Box::new(AudioRegisters::new(sample_rate)),
+            audio: Box::new(Apu::new(sample_rate)),
             serial: SerialPort::default(),
             sample_rate,
             now_unix_seconds: now,
@@ -138,7 +139,12 @@ impl MachineBus {
             }
             0xff00 => self.joypad.write(value),
             0xff01..=0xff02 => self.serial.write(address, value),
-            0xff04..=0xff07 => self.timer.write(address, value),
+            0xff04 => {
+                let requested = self.timer.write(address, value);
+                self.audio.write(address, 0);
+                requested
+            }
+            0xff05..=0xff07 => self.timer.write(address, value),
             0xff0f => {
                 self.interrupts.write_if(value);
                 InterruptMask::default()
@@ -176,7 +182,7 @@ impl MachineBus {
         self.interrupts = InterruptRegisters::default();
         self.dma = OamDma::default();
         self.video = Box::new(Ppu::post_boot_dmg());
-        self.audio = Box::new(AudioRegisters::new(self.sample_rate));
+        self.audio = Box::new(Apu::new(self.sample_rate));
         self.serial = SerialPort::default();
         self.now_unix_seconds = now;
         self.elapsed_t_cycles = 0;
@@ -255,6 +261,7 @@ impl CpuBus for MachineBus {
     }
     fn reset_divider(&mut self) {
         let requested = self.timer.write(0xff04, 0);
+        self.audio.write(0xff04, 0);
         self.interrupts.request(requested);
     }
 }
