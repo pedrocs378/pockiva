@@ -23,6 +23,7 @@ export type EmulatorRuntimeView = {
   pause: () => Promise<void>
   restart: () => Promise<void>
   close: () => Promise<void>
+  setAudioGain: (gain: number) => Promise<void>
   setKeyboardInput: (buttons: RuntimeButton[]) => Promise<void>
   acknowledgeFrame: (sequence: number) => Promise<void>
   subscribeFrames: (consumer: (frame: FramePacket) => void) => () => void
@@ -86,6 +87,7 @@ export const useEmulatorRuntime = (client: EmulatorRuntimeClient = tauriEmulator
   const pause = useCallback(() => applyAction(() => client.pause()), [applyAction, client])
   const restart = useCallback(() => applyAction(() => client.restart()), [applyAction, client])
   const close = useCallback(() => applyAction(() => client.close()), [applyAction, client])
+  const setAudioGain = useCallback((gain: number) => client.setAudioGain(gain), [client])
   const setKeyboardInput = useCallback((buttons: RuntimeButton[]) => client.setKeyboardInput(buttons), [client])
   const acknowledgeFrame = useCallback((sequence: number) => client.acknowledgeFrame(sequence), [client])
 
@@ -96,6 +98,7 @@ export const useEmulatorRuntime = (client: EmulatorRuntimeClient = tauriEmulator
     pause,
     restart,
     close,
+    setAudioGain,
     setKeyboardInput,
     acknowledgeFrame,
     subscribeFrames

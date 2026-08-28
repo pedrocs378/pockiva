@@ -1,5 +1,7 @@
+import type { CSSProperties } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Skeleton } from '@/components/ui/skeleton'
+import type { DisplayScale } from './emulator-preferences'
 import type { RuntimeError, RuntimePhase } from './runtime-types'
 import { FrameCanvas, type FramePacket } from './video'
 
@@ -8,11 +10,18 @@ type GameViewportProps = {
   error: RuntimeError | null
   subscribeFrames: (consumer: (frame: FramePacket) => void) => () => void
   acknowledgeFrame: (sequence: number) => Promise<void>
+  displayScale: DisplayScale
 }
 
-export const GameViewport = ({ phase, error, subscribeFrames, acknowledgeFrame }: GameViewportProps) => {
+type ViewportStyle = CSSProperties & { '--game-screen-width': string }
+
+const viewportStyle = (displayScale: DisplayScale): ViewportStyle => ({
+  '--game-screen-width': displayScale === 'fit' ? '100%' : `${160 * displayScale}px`
+})
+
+export const GameViewport = ({ phase, error, subscribeFrames, acknowledgeFrame, displayScale }: GameViewportProps) => {
   return (
-    <div className="game-viewport-shell">
+    <div className="game-viewport-shell" data-display-scale={displayScale} style={viewportStyle(displayScale)}>
       <FrameCanvas subscribeFrames={subscribeFrames} acknowledgeFrame={acknowledgeFrame} />
 
       {phase === 'empty' && (

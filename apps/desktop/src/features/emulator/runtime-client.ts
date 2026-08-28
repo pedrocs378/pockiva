@@ -24,6 +24,7 @@ export interface EmulatorRuntimeClient {
   pause(): Promise<RuntimeSnapshot>
   restart(): Promise<RuntimeSnapshot>
   close(): Promise<RuntimeSnapshot>
+  setAudioGain(gain: number): Promise<void>
   setKeyboardInput(buttons: RuntimeButton[]): Promise<void>
   acknowledgeFrame(sequence: number): Promise<void>
 }
@@ -93,6 +94,7 @@ export const tauriEmulatorRuntimeClient: EmulatorRuntimeClient = {
   pause: () => callForSnapshot('pause_rom'),
   restart: () => callForSnapshot('restart_rom'),
   close: () => callForSnapshot('close_rom'),
+  setAudioGain: (gain) => call<void>('set_audio_gain', { gain }),
   setKeyboardInput: (buttons) => call<void>('set_keyboard_input', { buttons }),
   acknowledgeFrame: (sequence) => call<void>('acknowledge_frame', { sequence })
 }

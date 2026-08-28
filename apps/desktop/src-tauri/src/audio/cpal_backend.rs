@@ -75,6 +75,9 @@ impl AudioOutput for CpalAudioOutput {
     fn enqueue(&mut self, batch: &AudioBatch) -> Result<(), AudioBackendError> {
         self.producer.enqueue(batch)
     }
+    fn set_gain(&mut self, gain: f32) -> Result<(), AudioBackendError> {
+        self.producer.set_gain(gain)
+    }
     fn health(&self) -> AudioHealth {
         self.producer.health()
     }

@@ -1,8 +1,11 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { SettingsStore } from '@/lib/settings-store'
+import { defaultEmulatorPreferences, type EmulatorPreferences } from '@/features/emulator/emulator-preferences'
+import { EmulatorPreferencesRepository } from '@/features/emulator/emulator-preferences-store'
 import type { EmulatorRuntimeClient, RuntimeSubscription } from '@/features/emulator/runtime-client'
 import type { RuntimeErrorCode, RuntimeSnapshot } from '@/features/emulator/runtime-types'
 import { defaultKeyboardMapping } from '@/features/keyboard/keyboard-mapping'
@@ -52,12 +55,20 @@ const createClient = (): EmulatorRuntimeClient => ({
   pause: vi.fn().mockResolvedValue(pausedSnapshot),
   restart: vi.fn().mockResolvedValue(runningSnapshot),
   close: vi.fn().mockResolvedValue(emptySnapshot),
+  setAudioGain: vi.fn().mockResolvedValue(undefined),
   setKeyboardInput: vi.fn().mockResolvedValue(undefined),
   acknowledgeFrame: vi.fn().mockResolvedValue(undefined)
 })
 
 const createRepository = (value = defaultKeyboardMapping) =>
   new KeyboardMappingRepository({
+    get: vi.fn().mockResolvedValue(value),
+    set: vi.fn().mockResolvedValue(undefined),
+    save: vi.fn().mockResolvedValue(undefined)
+  })
+
+const createPreferencesRepository = (value: EmulatorPreferences = defaultEmulatorPreferences) =>
+  new EmulatorPreferencesRepository({
     get: vi.fn().mockResolvedValue(value),
     set: vi.fn().mockResolvedValue(undefined),
     save: vi.fn().mockResolvedValue(undefined)
@@ -73,13 +84,15 @@ const createRemoteClient = (initial: RemoteSnapshot = remoteOffSnapshot): Remote
 const renderPage = (
   runtimeClient: EmulatorRuntimeClient = createClient(),
   keyboardMappingRepository = createRepository(),
-  remoteSessionClient = createRemoteClient()
+  remoteSessionClient = createRemoteClient(),
+  emulatorPreferencesRepository = createPreferencesRepository()
 ) =>
   render(
     <EmulatorPage
       runtimeClient={runtimeClient}
       keyboardMappingRepository={keyboardMappingRepository}
       remoteSessionClient={remoteSessionClient}
+      emulatorPreferencesRepository={emulatorPreferencesRepository}
     />
   )
 
@@ -92,8 +105,7 @@ describe('EmulatorPage lifecycle', () => {
     expect(screen.getByRole('heading', { name: 'Game Boy' })).toBeVisible()
     expect(screen.getByText('No ROM loaded')).toBeVisible()
     expect(screen.getByRole('button', { name: 'Open ROM' })).toBeEnabled()
-    expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Pause' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Restart' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Close ROM' })).toBeDisabled()
     expect(screen.getByText('Mobile controller is off')).toBeVisible()
@@ -139,7 +151,7 @@ describe('EmulatorPage lifecycle', () => {
       renderPage(runtimeClient, createRepository(), createRemoteClient(remoteError))
 
       expect(await screen.findByText(heading)).toBeVisible()
-      for (const name of ['Open ROM', 'Start', 'Restart', 'Close ROM', 'Keyboard controls']) {
+      for (const name of ['Open ROM', 'Resume', 'Restart', 'Close ROM', 'Keyboard controls']) {
         expect(screen.getByRole('button', { name })).toBeEnabled()
       }
     }
@@ -153,18 +165,17 @@ describe('EmulatorPage lifecycle', () => {
     await user.click(screen.getByRole('button', { name: 'Open ROM' }))
     await screen.findByText('fixture.gb')
     expect(screen.getAllByText('Paused')).toHaveLength(2)
-    expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled()
-    expect(screen.getByRole('button', { name: 'Pause' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Restart' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Close ROM' })).toBeEnabled()
 
-    await user.click(screen.getByRole('button', { name: 'Start' }))
+    await user.click(screen.getByRole('button', { name: 'Resume' }))
     expect(await screen.findByText('Running')).toBeVisible()
     expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled()
 
     await user.click(screen.getByRole('button', { name: 'Close ROM' }))
     expect(await screen.findByText('No ROM loaded')).toBeVisible()
-    expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeDisabled()
   })
 
   it('disables every lifecycle action while loading', async () => {
@@ -176,7 +187,7 @@ describe('EmulatorPage lifecycle', () => {
 
     await user.click(screen.getByRole('button', { name: 'Open ROM' }))
     expect(screen.getByLabelText('Loading ROM')).toBeVisible()
-    for (const name of ['Open ROM', 'Start', 'Pause', 'Restart', 'Close ROM']) {
+    for (const name of ['Open ROM', 'Resume', 'Restart', 'Close ROM']) {
       expect(screen.getByRole('button', { name })).toBeDisabled()
     }
 
@@ -249,6 +260,95 @@ describe('EmulatorPage lifecycle', () => {
     await waitFor(() => expect(client.setKeyboardInput).toHaveBeenLastCalledWith([]))
   })
 
+  it('loads persisted audio and display preferences and applies mute to the runtime', async () => {
+    const client = createClient()
+    const preferences = { volumePercent: 35, muted: true, displayScale: 4 } as const
+
+    renderPage(client, createRepository(), createRemoteClient(), createPreferencesRepository(preferences))
+
+    await waitFor(() => expect(client.setAudioGain).toHaveBeenCalledWith(0))
+    expect(screen.getByLabelText('Volume')).toHaveValue('35')
+    expect(screen.getByLabelText('Screen size')).toHaveValue('4')
+    expect(screen.getByRole('button', { name: 'Unmute' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('img', { name: 'Game display' }).parentElement).toHaveStyle({
+      '--game-screen-width': '640px'
+    })
+  })
+
+  it('persists volume, mute, and display scale while applying changes immediately', async () => {
+    const user = userEvent.setup()
+    const client = createClient()
+    const calls: string[] = []
+    const store: SettingsStore = {
+      get: vi.fn().mockResolvedValue(defaultEmulatorPreferences),
+      set: vi.fn(async () => {
+        calls.push('set')
+      }),
+      save: vi.fn(async () => {
+        calls.push('save')
+      })
+    }
+    renderPage(client, createRepository(), createRemoteClient(), new EmulatorPreferencesRepository(store))
+    await waitFor(() => expect(client.setAudioGain).toHaveBeenCalledWith(1))
+
+    await user.click(screen.getByRole('button', { name: 'Mute' }))
+    expect(client.setAudioGain).toHaveBeenLastCalledWith(0)
+
+    fireEvent.change(screen.getByLabelText('Volume'), { target: { value: '42' } })
+    expect(client.setAudioGain).toHaveBeenLastCalledWith(0)
+
+    await user.click(screen.getByRole('button', { name: 'Unmute' }))
+    expect(client.setAudioGain).toHaveBeenLastCalledWith(0.42)
+
+    await user.selectOptions(screen.getByLabelText('Screen size'), '4')
+    await waitFor(() =>
+      expect(store.set).toHaveBeenLastCalledWith('emulatorPreferencesV1', {
+        volumePercent: 42,
+        muted: false,
+        displayScale: 4
+      })
+    )
+    expect(calls.at(-1)).toBe('save')
+  })
+
+  it('does not let a delayed initial load replace a newer user preference', async () => {
+    const client = createClient()
+    const pending = deferred<EmulatorPreferences>()
+    const repository = createPreferencesRepository()
+    vi.spyOn(repository, 'load').mockReturnValueOnce(pending.promise)
+    renderPage(client, createRepository(), createRemoteClient(), repository)
+
+    fireEvent.change(screen.getByLabelText('Volume'), { target: { value: '42' } })
+    expect(screen.getByLabelText('Volume')).toHaveValue('42')
+    expect(client.setAudioGain).toHaveBeenLastCalledWith(0.42)
+
+    await act(async () => {
+      pending.resolve({ volumePercent: 15, muted: false, displayScale: 1 })
+      await pending.promise
+    })
+
+    expect(screen.getByLabelText('Volume')).toHaveValue('42')
+    expect(screen.getByLabelText('Screen size')).toHaveValue('3')
+    expect(client.setAudioGain).toHaveBeenCalledOnce()
+    expect(client.setAudioGain).toHaveBeenLastCalledWith(0.42)
+  })
+
+  it('provides desktop shortcuts without intercepting editable controls', async () => {
+    const client = createClient()
+    vi.mocked(client.subscribe).mockResolvedValueOnce(pausedSnapshot)
+    renderPage(client)
+    await screen.findByText('fixture.gb')
+
+    fireEvent.keyDown(window, { code: 'Space' })
+    await waitFor(() => expect(client.start).toHaveBeenCalledOnce())
+
+    fireEvent.keyDown(window, { code: 'KeyR', metaKey: true, shiftKey: true })
+    await waitFor(() => expect(client.restart).toHaveBeenCalledOnce())
+
+    fireEvent.keyDown(screen.getByLabelText('Volume'), { code: 'Space' })
+    expect(client.start).toHaveBeenCalledOnce()
+  })
+
   it('falls back to defaults when settings cannot be loaded', async () => {
     const repository = createRepository()
     vi.spyOn(repository, 'load').mockRejectedValueOnce(new Error('settings unavailable'))
@@ -256,6 +356,17 @@ describe('EmulatorPage lifecycle', () => {
     renderPage(createClient(), repository)
 
     expect(await screen.findByText('Controls could not be loaded. Default keys are active.')).toBeVisible()
+  })
+
+  it('keeps defaults active when emulator preferences cannot be loaded', async () => {
+    const repository = createPreferencesRepository()
+    vi.spyOn(repository, 'load').mockRejectedValueOnce(new Error('settings unavailable'))
+
+    renderPage(createClient(), createRepository(), createRemoteClient(), repository)
+
+    expect(await screen.findByText(/Emulator preferences could not be/)).toBeVisible()
+    expect(screen.getByLabelText('Volume')).toHaveValue('100')
+    expect(screen.getByLabelText('Screen size')).toHaveValue('3')
   })
 
   it('collapses the remote controller layout at the 640px breakpoint', () => {

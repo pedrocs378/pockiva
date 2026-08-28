@@ -1,6 +1,6 @@
 use std::num::NonZeroU32;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use gb_core::AudioBatch;
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
@@ -11,6 +11,7 @@ use super::{AudioBackendError, AudioBackendErrorKind, AudioHealth, AudioWatermar
 #[derive(Debug)]
 struct QueueState {
     paused: AtomicBool,
+    gain_bits: AtomicU32,
     flush_epoch: AtomicU64,
     flushed_epoch: AtomicU64,
     underruns: AtomicU64,
@@ -23,6 +24,7 @@ impl Default for QueueState {
     fn default() -> Self {
         Self {
             paused: AtomicBool::new(true),
+            gain_bits: AtomicU32::new(1.0_f32.to_bits()),
             flush_epoch: AtomicU64::new(0),
             flushed_epoch: AtomicU64::new(0),
             underruns: AtomicU64::new(0),
@@ -117,6 +119,19 @@ impl AudioQueueProducer {
         }
     }
 
+    pub(crate) fn set_gain(&self, gain: f32) -> Result<(), AudioBackendError> {
+        if !gain.is_finite() || !(0.0..=1.0).contains(&gain) {
+            return Err(AudioBackendError::new(
+                AudioBackendErrorKind::Backend,
+                "audio gain must be finite and between zero and one",
+            ));
+        }
+        self.state
+            .gain_bits
+            .store(gain.to_bits(), Ordering::Release);
+        Ok(())
+    }
+
     pub(crate) fn pause_and_flush(&self) {
         self.state.paused.store(true, Ordering::Release);
         self.state.flush_epoch.fetch_add(1, Ordering::AcqRel);
@@ -150,11 +165,8 @@ impl AudioQueueConsumer {
         fill_output(
             &mut self.consumer,
             output,
-            &self.state.paused,
-            &self.state.flush_epoch,
-            &self.state.flushed_epoch,
+            &self.state,
             &mut self.observed_epoch,
-            &self.state.underruns,
         );
     }
 }
@@ -175,30 +187,31 @@ impl AudioQueueErrorReporter {
     }
 }
 
-pub(crate) fn fill_output(
+fn fill_output(
     consumer: &mut HeapCons<f32>,
     output: &mut [f32],
-    paused: &AtomicBool,
-    flush_epoch: &AtomicU64,
-    flushed_epoch: &AtomicU64,
+    state: &QueueState,
     observed_epoch: &mut u64,
-    underruns: &AtomicU64,
 ) {
     debug_assert!(output.len().is_multiple_of(2));
-    let epoch = flush_epoch.load(Ordering::Acquire);
+    let epoch = state.flush_epoch.load(Ordering::Acquire);
     if epoch != *observed_epoch {
         consumer.clear();
         *observed_epoch = epoch;
-        flushed_epoch.store(epoch, Ordering::Release);
+        state.flushed_epoch.store(epoch, Ordering::Release);
     }
-    if paused.load(Ordering::Acquire) {
+    if state.paused.load(Ordering::Acquire) {
         output.fill(0.0);
         return;
     }
     let copied = consumer.pop_slice(output);
+    let gain = f32::from_bits(state.gain_bits.load(Ordering::Acquire));
+    for sample in &mut output[..copied] {
+        *sample *= gain;
+    }
     output[copied..].fill(0.0);
     if copied < output.len() {
-        underruns.fetch_add(1, Ordering::Relaxed);
+        state.underruns.fetch_add(1, Ordering::Relaxed);
     }
     if !output.len().is_multiple_of(2) {
         output[output.len() - 1] = 0.0;

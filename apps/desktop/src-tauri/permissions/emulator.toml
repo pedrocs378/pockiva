@@ -9,6 +9,7 @@ commands.allow = [
   "pause_rom",
   "restart_rom",
   "close_rom",
+  "set_audio_gain",
   "set_keyboard_input",
   "acknowledge_frame",
   "remote_snapshot",

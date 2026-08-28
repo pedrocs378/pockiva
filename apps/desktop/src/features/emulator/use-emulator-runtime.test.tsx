@@ -41,6 +41,7 @@ const createClient = () => {
     pause: vi.fn().mockResolvedValue(pausedSnapshot),
     restart: vi.fn().mockResolvedValue(runningSnapshot),
     close: vi.fn().mockResolvedValue(emptySnapshot),
+    setAudioGain: vi.fn().mockResolvedValue(undefined),
     setKeyboardInput: vi.fn().mockResolvedValue(undefined),
     acknowledgeFrame: vi.fn().mockResolvedValue(undefined)
   }
@@ -129,10 +130,12 @@ describe('useEmulatorRuntime', () => {
     await act(() => result.current.pause())
     await act(() => result.current.restart())
     await act(() => result.current.close())
+    await act(() => result.current.setAudioGain(0.6))
 
     expect(client.start).toHaveBeenCalledOnce()
     expect(client.pause).toHaveBeenCalledOnce()
     expect(client.restart).toHaveBeenCalledOnce()
     expect(client.close).toHaveBeenCalledOnce()
+    expect(client.setAudioGain).toHaveBeenCalledWith(0.6)
   })
 })

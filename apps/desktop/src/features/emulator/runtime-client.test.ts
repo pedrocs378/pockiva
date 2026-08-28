@@ -89,6 +89,9 @@ describe('tauri emulator runtime client', () => {
 
     await client.acknowledgeFrame(7)
     expect(tauriMocks.invoke).toHaveBeenLastCalledWith('acknowledge_frame', { sequence: 7 })
+
+    await client.setAudioGain(0.35)
+    expect(tauriMocks.invoke).toHaveBeenLastCalledWith('set_audio_gain', { gain: 0.35 })
   })
 
   it('uses separate parsed-control and raw-frame channels', async () => {

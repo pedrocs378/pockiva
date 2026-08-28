@@ -1,13 +1,7 @@
-import { LazyStore } from '@tauri-apps/plugin-store'
+import { type SettingsStore, tauriSettingsStore } from '@/lib/settings-store'
 import { defaultKeyboardMapping, type KeyboardMapping, parseKeyboardMapping } from './keyboard-mapping'
 
 const SETTINGS_KEY = 'keyboardMappingV1'
-
-export interface SettingsStore {
-  get<T>(key: string): Promise<T | null | undefined>
-  set(key: string, value: unknown): Promise<void>
-  save(): Promise<void>
-}
 
 export class KeyboardMappingRepository {
   constructor(private readonly store: SettingsStore) {}
@@ -31,4 +25,4 @@ export class KeyboardMappingRepository {
   }
 }
 
-export const tauriKeyboardMappingRepository = new KeyboardMappingRepository(new LazyStore('settings.json'))
+export const tauriKeyboardMappingRepository = new KeyboardMappingRepository(tauriSettingsStore)

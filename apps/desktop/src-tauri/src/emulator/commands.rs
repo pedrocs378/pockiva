@@ -122,6 +122,16 @@ pub(crate) fn close_rom_impl(runtime: &DesktopRuntime) -> RuntimeResult<RuntimeS
 
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
+pub fn set_audio_gain(gain: f32, state: State<'_, DesktopRuntime>) -> RuntimeResult<()> {
+    set_audio_gain_impl(gain, &state)
+}
+
+pub(crate) fn set_audio_gain_impl(gain: f32, runtime: &DesktopRuntime) -> RuntimeResult<()> {
+    runtime.set_audio_gain(gain)
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 pub fn set_keyboard_input(
     buttons: Vec<RuntimeButton>,
     state: State<'_, DesktopRuntime>,
@@ -155,8 +165,8 @@ mod tests {
 
     use super::{
         ChannelObserver, RuntimeObserver, close_rom_impl, open_rom_impl, pause_rom_impl,
-        restart_rom_impl, runtime_snapshot_impl, set_keyboard_input_impl, start_rom_impl,
-        subscribe_runtime_impl,
+        restart_rom_impl, runtime_snapshot_impl, set_audio_gain_impl, set_keyboard_input_impl,
+        start_rom_impl, subscribe_runtime_impl,
     };
     use crate::emulator::contracts::{RuntimeButton, RuntimeEvent, RuntimePhase};
     use crate::emulator::mock_core::ContractMockCoreFactory;
@@ -178,6 +188,7 @@ mod tests {
             RuntimePhase::Paused
         );
         set_keyboard_input_impl(vec![RuntimeButton::A], &runtime).expect("input");
+        set_audio_gain_impl(0.5, &runtime).expect("audio gain");
         assert_eq!(
             start_rom_impl(&runtime).expect("start").phase,
             RuntimePhase::Running

@@ -138,6 +138,46 @@ mod queue {
     }
 
     #[test]
+    fn callback_applies_gain_and_supports_muting_without_changing_queue_depth() {
+        let (mut producer, mut consumer) = new_queue(rate(48_000));
+        producer
+            .enqueue(&AudioBatch::new(rate(48_000), vec![1.0, -1.0, 0.5, -0.5]).unwrap())
+            .unwrap();
+        producer.set_gain(0.25).unwrap();
+        producer.play().unwrap();
+
+        let mut output = [9.0; 4];
+        consumer.fill(&mut output);
+        assert!(
+            output
+                .into_iter()
+                .zip([0.25, -0.25, 0.125, -0.125])
+                .all(|(actual, expected)| (actual - expected).abs() <= f32::EPSILON)
+        );
+
+        producer
+            .enqueue(&AudioBatch::new(rate(48_000), vec![1.0, -1.0]).unwrap())
+            .unwrap();
+        producer.set_gain(0.0).unwrap();
+        let queued_before_mute = producer.health().queued_stereo_frames;
+        consumer.fill(&mut output[..2]);
+        assert_eq!(queued_before_mute, 1);
+        assert_eq!(&output[..2], &[0.0, 0.0]);
+        assert_eq!(producer.health().queued_stereo_frames, 0);
+    }
+
+    #[test]
+    fn gain_rejects_non_finite_and_out_of_range_values() {
+        let (producer, _consumer) = new_queue(rate(48_000));
+        for gain in [f32::NAN, f32::INFINITY, -0.01, 1.01] {
+            assert_eq!(
+                producer.set_gain(gain).unwrap_err().kind,
+                AudioBackendErrorKind::Backend
+            );
+        }
+    }
+
+    #[test]
     fn callback_error_health_distinguishes_xruns_from_terminal_errors() {
         let (producer, consumer) = new_queue(rate(48_000));
         let reporter = consumer.error_reporter();

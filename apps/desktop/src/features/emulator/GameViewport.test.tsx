@@ -12,7 +12,13 @@ const putImageData = vi.fn()
 
 const renderViewport = (phase: RuntimePhase, error: RuntimeError | null = null) =>
   render(
-    <GameViewport phase={phase} error={error} subscribeFrames={subscribeFrames} acknowledgeFrame={acknowledgeFrame} />
+    <GameViewport
+      phase={phase}
+      error={error}
+      subscribeFrames={subscribeFrames}
+      acknowledgeFrame={acknowledgeFrame}
+      displayScale={3}
+    />
   )
 
 describe('GameViewport', () => {
@@ -63,12 +69,19 @@ describe('GameViewport', () => {
         error={null}
         subscribeFrames={subscribeFrames}
         acknowledgeFrame={acknowledgeFrame}
+        displayScale={3}
       />
     )
     expect(screen.getByLabelText('Loading ROM')).toBeVisible()
 
     rerender(
-      <GameViewport phase="paused" error={null} subscribeFrames={subscribeFrames} acknowledgeFrame={acknowledgeFrame} />
+      <GameViewport
+        phase="paused"
+        error={null}
+        subscribeFrames={subscribeFrames}
+        acknowledgeFrame={acknowledgeFrame}
+        displayScale={3}
+      />
     )
     expect(screen.getByText('Paused')).toBeVisible()
 
@@ -78,9 +91,36 @@ describe('GameViewport', () => {
         error={{ code: 'invalid-rom', message: 'This file is not a valid Game Boy ROM.' }}
         subscribeFrames={subscribeFrames}
         acknowledgeFrame={acknowledgeFrame}
+        displayScale="fit"
       />
     )
     expect(screen.getByRole('alert')).toHaveTextContent('This file is not a valid Game Boy ROM.')
+  })
+
+  it('maps integer and fit display scales without changing the native canvas resolution', () => {
+    const { rerender } = render(
+      <GameViewport
+        phase="empty"
+        error={null}
+        subscribeFrames={subscribeFrames}
+        acknowledgeFrame={acknowledgeFrame}
+        displayScale={4}
+      />
+    )
+    const shell = screen.getByRole('img', { name: 'Game display' }).parentElement
+    expect(shell).toHaveAttribute('data-display-scale', '4')
+    expect(shell).toHaveStyle({ '--game-screen-width': '640px' })
+
+    rerender(
+      <GameViewport
+        phase="empty"
+        error={null}
+        subscribeFrames={subscribeFrames}
+        acknowledgeFrame={acknowledgeFrame}
+        displayScale="fit"
+      />
+    )
+    expect(shell).toHaveStyle({ '--game-screen-width': '100%' })
   })
 
   it('draws the latest raw frame before acknowledging it', async () => {

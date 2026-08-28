@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { SettingsStore } from '@/lib/settings-store'
 import { defaultKeyboardMapping } from './keyboard-mapping'
-import { KeyboardMappingRepository, type SettingsStore } from './keyboard-mapping-store'
+import { KeyboardMappingRepository } from './keyboard-mapping-store'
 
 const createStore = (value: unknown = null) => {
   const calls: string[] = []

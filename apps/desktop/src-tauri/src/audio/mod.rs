@@ -61,6 +61,7 @@ pub(crate) trait AudioOutput: Send {
     fn sample_rate(&self) -> NonZeroU32;
     fn watermarks(&self) -> AudioWatermarks;
     fn enqueue(&mut self, batch: &AudioBatch) -> Result<(), AudioBackendError>;
+    fn set_gain(&mut self, gain: f32) -> Result<(), AudioBackendError>;
     fn health(&self) -> AudioHealth;
     fn play(&mut self) -> Result<(), AudioBackendError>;
     fn pause_and_flush(&mut self) -> Result<(), AudioBackendError>;

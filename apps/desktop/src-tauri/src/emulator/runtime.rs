@@ -220,6 +220,10 @@ enum RuntimeCommand {
     Close {
         reply: SyncSender<RuntimeResult<RuntimeSnapshot>>,
     },
+    SetAudioGain {
+        gain: f32,
+        reply: SyncSender<RuntimeResult<()>>,
+    },
     SetKeyboardInput {
         buttons: Vec<RuntimeButton>,
         reply: SyncSender<RuntimeResult<()>>,
@@ -254,6 +258,7 @@ struct RuntimeAudio {
     first_open: bool,
     output: Option<Box<dyn AudioOutput>>,
     playing: bool,
+    gain: f32,
     disabled_reason: Option<AudioBackendError>,
 }
 
@@ -271,6 +276,7 @@ impl RuntimeAudio {
             first_open: true,
             output: None,
             playing: false,
+            gain: 1.0,
             disabled_reason,
         }
     }
@@ -284,7 +290,12 @@ impl RuntimeAudio {
             self.factory.open_default()
         };
         match candidate {
-            Ok(output) if output.sample_rate() == self.sample_rate => {
+            Ok(mut output) if output.sample_rate() == self.sample_rate => {
+                if let Err(error) = output.set_gain(self.gain) {
+                    output.shutdown();
+                    self.disabled_reason = Some(error);
+                    return None;
+                }
                 let _ = self.disabled_reason.take();
                 Some(output)
             }
@@ -310,6 +321,27 @@ impl RuntimeAudio {
     fn activate(&mut self, output: Option<Box<dyn AudioOutput>>) {
         self.output = output;
         self.playing = false;
+    }
+
+    fn set_gain(&mut self, gain: f32) -> RuntimeResult<()> {
+        if !gain.is_finite() || !(0.0..=1.0).contains(&gain) {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvalidLifecycle,
+                "Audio gain must be between zero and one.",
+            ));
+        }
+        self.gain = gain;
+        if let Some(output) = self.output.as_deref_mut()
+            && let Err(error) = output.set_gain(gain)
+        {
+            let message = error.message.clone();
+            self.disable(error);
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::RuntimeUnavailable,
+                message,
+            ));
+        }
+        Ok(())
     }
 
     fn pause(&mut self) {
@@ -582,6 +614,10 @@ impl DesktopRuntime {
 
     pub fn close(&self) -> RuntimeResult<RuntimeSnapshot> {
         self.request(|reply| RuntimeCommand::Close { reply })
+    }
+
+    pub fn set_audio_gain(&self, gain: f32) -> RuntimeResult<()> {
+        self.request(|reply| RuntimeCommand::SetAudioGain { gain, reply })
     }
 
     pub fn set_keyboard_input(&self, buttons: Vec<RuntimeButton>) -> RuntimeResult<()> {
@@ -891,6 +927,9 @@ fn handle_command(
             model.close();
             let _ = publish_control(model, observer);
             let _ = reply.send(Ok(model.snapshot()));
+        }
+        RuntimeCommand::SetAudioGain { gain, reply } => {
+            let _ = reply.send(audio.set_gain(gain));
         }
         RuntimeCommand::SetKeyboardInput { buttons, reply } => {
             let result = set_keyboard_input(core.as_deref_mut(), buttons);
@@ -2012,6 +2051,39 @@ mod tests {
     }
 
     #[test]
+    fn audio_gain_is_retained_before_rom_load_and_updates_the_active_output() {
+        let path = synthetic_rom_path();
+        let rate = test_rate();
+        let audio_factory = Arc::new(RecordingAudioFactory::new(rate));
+        let (prepared, audio_state) = audio_factory.output();
+        let runtime = DesktopRuntime::spawn_with_audio(
+            Arc::new(RecordingCoreFactory::default()),
+            audio_factory,
+            rate,
+            Some(prepared),
+        );
+
+        runtime.set_audio_gain(0.35).expect("retains gain");
+        runtime.open_rom(path.clone()).expect("loads ROM");
+        assert!((audio_state.lock().expect("audio state").gain - 0.35).abs() < f32::EPSILON);
+
+        runtime.set_audio_gain(0.0).expect("mutes active output");
+        assert!(audio_state.lock().expect("audio state").gain.abs() <= f32::EPSILON);
+        for invalid in [f32::NAN, -0.01, 1.01] {
+            assert_eq!(
+                runtime
+                    .set_audio_gain(invalid)
+                    .expect_err("reject invalid gain")
+                    .code,
+                RuntimeErrorCode::InvalidLifecycle
+            );
+        }
+
+        runtime.shutdown().expect("shutdown");
+        fs::remove_file(path).expect("remove synthetic ROM");
+    }
+
+    #[test]
     fn shutdown_releases_prepared_audio_before_any_rom_is_loaded() {
         let rate = test_rate();
         let audio_factory = Arc::new(RecordingAudioFactory::new(rate));
@@ -2731,6 +2803,7 @@ mod tests {
         usable: bool,
         playing: bool,
         consume_per_health: usize,
+        gain: f32,
         enqueue_rates: Vec<NonZeroU32>,
         calls: Vec<&'static str>,
         shutdown: bool,
@@ -2746,6 +2819,7 @@ mod tests {
                 usable: true,
                 playing: false,
                 consume_per_health: 0,
+                gain: 1.0,
                 enqueue_rates: Vec::new(),
                 calls: Vec::new(),
                 shutdown: false,
@@ -2803,6 +2877,11 @@ mod tests {
                 stream_errors: usize::from(!state.usable) as u64,
                 usable: state.usable,
             }
+        }
+
+        fn set_gain(&mut self, gain: f32) -> Result<(), AudioBackendError> {
+            self.state.lock().expect("fake audio state").gain = gain;
+            Ok(())
         }
 
         fn play(&mut self) -> Result<(), AudioBackendError> {

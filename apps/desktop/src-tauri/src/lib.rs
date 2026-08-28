@@ -6,7 +6,7 @@ use std::sync::Arc;
 use audio::{AudioOutputFactory, CpalAudioOutputFactory};
 use emulator::commands::{
     acknowledge_frame, close_rom, open_rom, pause_rom, restart_rom, runtime_snapshot,
-    set_keyboard_input, start_rom, subscribe_runtime,
+    set_audio_gain, set_keyboard_input, start_rom, subscribe_runtime,
 };
 use emulator::factory::GameBoyCoreFactory;
 use emulator::runtime::DesktopRuntime;
@@ -71,6 +71,7 @@ pub fn run() {
             pause_rom,
             restart_rom,
             close_rom,
+            set_audio_gain,
             set_keyboard_input,
             acknowledge_frame,
             remote_snapshot,
