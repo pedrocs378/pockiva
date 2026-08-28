@@ -48,11 +48,12 @@ impl Mbc1 {
     }
 
     fn switch_bank(&self) -> usize {
-        let mut bank = (usize::from(self.bank_high) << 5) | usize::from(self.rom_bank_low);
+        let raw_bank = (usize::from(self.bank_high) << 5) | usize::from(self.rom_bank_low);
+        let mut bank = raw_bank % self.rom_banks;
         if bank.trailing_zeros() >= 5 {
-            bank += 1;
+            bank = (bank + 1) % self.rom_banks;
         }
-        bank % self.rom_banks
+        bank
     }
 
     fn ram_bank(&self) -> usize {

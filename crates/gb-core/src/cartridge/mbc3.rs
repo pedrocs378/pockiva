@@ -125,10 +125,11 @@ impl RtcState {
 
     fn bytes(&self, now: u64) -> Vec<u8> {
         let (counter, carry) = self.live(now);
+        let persisted_timestamp = self.last_update_unix.max(now);
         let mut bytes = Vec::with_capacity(22);
         bytes.extend_from_slice(b"M3R1");
         bytes.extend_from_slice(&counter.to_le_bytes());
-        bytes.extend_from_slice(&now.to_le_bytes());
+        bytes.extend_from_slice(&persisted_timestamp.to_le_bytes());
         bytes.push(u8::from(self.halted));
         bytes.push(u8::from(carry));
         bytes

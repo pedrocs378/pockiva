@@ -136,6 +136,15 @@ fn mbc1_aliases_forbidden_switchable_banks_and_gates_ram() {
 }
 
 #[test]
+fn mbc1_normalizes_non_power_of_two_rom_before_forbidden_bank_alias() {
+    let mut mapper = Mbc1::new(numbered_rom(72, 0x01, 0), 0, false, None).expect("MBC1 constructs");
+    mapper.write_rom(0x2000, 0, 0);
+    mapper.write_rom(0x4000, 3, 0);
+
+    assert_eq!(mapper.read_rom(0x4000), 24);
+}
+
+#[test]
 fn mbc3_latch_freezes_snapshot_and_persists_exact_schema() {
     let mut mapper = Mbc3::new(numbered_rom(4, 0x10, 3), 0x8000, true, true, None, 10_000)
         .expect("MBC3 constructs");
@@ -160,6 +169,31 @@ fn mbc3_latch_freezes_snapshot_and_persists_exact_schema() {
         13_691,
     )
     .expect("persisted RTC restores");
+}
+
+#[test]
+fn mbc3_persistence_preserves_future_baseline_when_clock_regresses() {
+    let mapper =
+        Mbc3::new(numbered_rom(4, 0x0f, 0), 0, true, true, None, 100).expect("MBC3 constructs");
+    let regressed = mapper.battery_state(50).expect("battery state exists");
+    let restored = Mbc3::new(
+        numbered_rom(4, 0x0f, 0),
+        0,
+        true,
+        true,
+        Some(&regressed),
+        60,
+    )
+    .expect("regressed persisted state restores");
+    let state = restored.battery_state(60).expect("battery state exists");
+    assert_eq!(
+        u64::from_le_bytes(
+            state.mapper_data()[12..20]
+                .try_into()
+                .expect("timestamp bytes")
+        ),
+        100
+    );
 }
 
 #[test]
