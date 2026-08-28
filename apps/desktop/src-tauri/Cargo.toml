@@ -9,6 +9,9 @@ build = "build.rs"
 name = "gameboy_desktop"
 crate-type = ["lib", "cdylib", "staticlib"]
 
+[features]
+integration-test-support = []
+
 [lints]
 workspace = true
 
@@ -23,7 +26,10 @@ tauri-plugin-dialog = "2.7.2"
 tauri-plugin-store = "2.4.4"
 
 [dev-dependencies]
+futures-util = "=0.3.34"
 serde_json = "1.0"
+tokio = { version = "=1.53.1", features = ["macros", "net", "rt-multi-thread", "time"] }
+tokio-tungstenite = "=0.28.0"
 
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }

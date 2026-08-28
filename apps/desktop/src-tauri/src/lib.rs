@@ -20,6 +20,9 @@ use tauri::Manager;
 mod audio;
 mod contracts;
 mod emulator;
+#[cfg(feature = "integration-test-support")]
+#[doc(hidden)]
+pub mod integration_test_support;
 mod remote;
 mod video;
 

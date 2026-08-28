@@ -1048,6 +1048,7 @@ name = "gameboy-desktop"
 version = "0.1.0"
 dependencies = [
  "cpal",
+ "futures-util",
  "gb-core",
  "gb-network",
  "ringbuf",
@@ -1057,6 +1058,8 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-store",
+ "tokio",
+ "tokio-tungstenite 0.28.0",
 ]
 
 [[package]]

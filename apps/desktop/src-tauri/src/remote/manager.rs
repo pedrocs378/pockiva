@@ -1,10 +1,14 @@
 use std::cell::Cell;
 use std::collections::VecDeque;
+#[cfg(feature = "integration-test-support")]
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant};
 
 use gb_core::InputSourceId;
+#[cfg(feature = "integration-test-support")]
+use gb_network::OsSessionEntropy;
 use gb_network::{
     ControllerEvent, ControllerEventSink, ControllerEventSinkError, ControllerServer, NetworkError,
     PairingInfo, SessionServerConfig,
@@ -67,6 +71,31 @@ impl ControllerServerFactory for ProductionControllerServerFactory {
         sink: Arc<dyn ControllerEventSink>,
     ) -> Result<(Box<dyn RunningControllerServer>, PairingInfo), NetworkError> {
         let config = SessionServerConfig::production(controller_assets, REMOTE_INPUT_SOURCE)?;
+        let (server, pairing) = ControllerServer::start(config, sink)?;
+        Ok((Box::new(server), pairing))
+    }
+}
+
+#[derive(Debug, Default)]
+#[cfg(feature = "integration-test-support")]
+struct LoopbackControllerServerFactory;
+
+#[cfg(feature = "integration-test-support")]
+impl ControllerServerFactory for LoopbackControllerServerFactory {
+    fn start(
+        &self,
+        controller_assets: PathBuf,
+        sink: Arc<dyn ControllerEventSink>,
+    ) -> Result<(Box<dyn RunningControllerServer>, PairingInfo), NetworkError> {
+        let config = SessionServerConfig {
+            bind_address: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            controller_assets,
+            input_source: REMOTE_INPUT_SOURCE,
+            token_ttl: Duration::from_secs(600),
+            heartbeat_timeout: Duration::from_secs(18),
+            input_rate_per_second: 240,
+            entropy: Arc::new(OsSessionEntropy),
+        };
         let (server, pairing) = ControllerServer::start(config, sink)?;
         Ok((Box::new(server), pairing))
     }
@@ -247,6 +276,16 @@ impl RemoteSessionManager {
             runtime,
             controller_assets,
             Arc::new(ProductionControllerServerFactory),
+        )
+    }
+
+    #[must_use]
+    #[cfg(feature = "integration-test-support")]
+    pub(crate) fn new_loopback(runtime: DesktopRuntimeHandle, controller_assets: PathBuf) -> Self {
+        Self::new_with_factory(
+            runtime,
+            controller_assets,
+            Arc::new(LoopbackControllerServerFactory),
         )
     }
 
