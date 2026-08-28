@@ -53,6 +53,13 @@ impl<C: Clock + Send> GameBoy<C> {
     pub(crate) fn serial_output(&self) -> &[u8] {
         self.bus.as_ref().map_or(&[], MachineBus::serial_output)
     }
+
+    #[cfg(test)]
+    pub(crate) fn diagnostic_read(&self, address: u16) -> u8 {
+        self.bus
+            .as_ref()
+            .map_or(0xff, |bus| bus.diagnostic_read(address))
+    }
 }
 
 impl<C: Clock + Send> EmulatorCore for GameBoy<C> {

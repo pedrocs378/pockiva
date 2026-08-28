@@ -24,6 +24,50 @@ fn test_bus() -> MachineBus {
 }
 
 #[test]
+fn real_ppu_starts_in_post_boot_mode_and_advances_one_scanline() {
+    let mut bus = test_bus();
+    assert_eq!(bus.read_unclocked(0xff40), 0x91);
+    assert_eq!(bus.read_unclocked(0xff44), 0);
+    assert_eq!(bus.read_unclocked(0xff41) & 0x03, 2);
+
+    for _ in 0..114 {
+        bus.idle_m_cycle();
+    }
+
+    assert_eq!(bus.read_unclocked(0xff44), 1);
+    assert_eq!(bus.elapsed_t_cycles(), 456);
+}
+
+#[test]
+fn real_ppu_requests_vblank_and_publishes_one_fixed_rgba_frame() {
+    let mut bus = test_bus();
+    for _ in 0..(456 * 144 / 4) {
+        bus.idle_m_cycle();
+    }
+
+    assert_ne!(bus.interrupts.read_if() & 0x01, 0);
+    assert!(bus.frame_ready());
+    let frame = bus.take_frame().expect("VBlank publishes a frame");
+    assert_eq!(frame.rgba().len(), 160 * 144 * 4);
+    assert!(!bus.frame_ready());
+    assert!(bus.take_frame().is_none());
+}
+
+#[test]
+fn stat_register_writes_request_interrupts_without_waiting_for_another_tick() {
+    let mut bus = test_bus();
+    bus.write_unclocked(0xff0f, 0);
+
+    bus.write_unclocked(0xff41, 0x40);
+    assert_ne!(bus.interrupts.read_if() & 0x02, 0);
+
+    bus.write_unclocked(0xff45, 1);
+    bus.write_unclocked(0xff0f, 0);
+    bus.write_unclocked(0xff45, 0);
+    assert_ne!(bus.interrupts.read_if() & 0x02, 0);
+}
+
+#[test]
 fn wram_echoes_and_each_cpu_access_ticks_four_t_cycles() {
     let mut bus = test_bus();
     bus.write8(0xc123, 0xa5);
@@ -56,10 +100,17 @@ fn oam_dma_copies_one_byte_per_machine_cycle_and_blocks_non_hram_cpu_access() {
     while bus.dma.active() {
         bus.idle_m_cycle();
     }
+    assert_eq!(bus.elapsed_t_cycles(), 4 + 640);
+    assert_eq!(bus.video.read(0xfe00), 0xff);
+    let mut wait_cycles = 0;
+    while bus.video.read(0xff41) & 0x03 != 0 {
+        bus.idle_m_cycle();
+        wait_cycles += 1;
+        assert!(wait_cycles <= 114, "PPU reaches HBlank within one scanline");
+    }
     for expected in 0_u8..160 {
         assert_eq!(bus.video.read(0xfe00 + u16::from(expected)), expected);
     }
-    assert_eq!(bus.elapsed_t_cycles(), 4 + 640);
 }
 
 #[test]

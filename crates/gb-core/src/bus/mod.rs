@@ -1,4 +1,4 @@
-mod devices;
+pub(crate) mod devices;
 mod dma;
 
 use std::num::NonZeroU32;
@@ -7,9 +7,10 @@ use crate::cartridge::Cartridge;
 use crate::cpu::CpuBus;
 use crate::interrupts::{Interrupt, InterruptMask, InterruptRegisters};
 use crate::joypad::JoypadRegister;
+use crate::ppu::Ppu;
 use crate::timer::Timer;
 use crate::{AudioBatch, BatteryState, Frame, JoypadState};
-use devices::{AudioDevice, AudioRegisters, VideoDevice, VideoRegisters};
+use devices::{AudioDevice, AudioRegisters, VideoDevice};
 use dma::OamDma;
 
 #[derive(Default)]
@@ -73,7 +74,7 @@ impl MachineBus {
             timer: Timer::default(),
             interrupts: InterruptRegisters::default(),
             dma: OamDma::default(),
-            video: Box::new(VideoRegisters::default()),
+            video: Box::new(Ppu::post_boot_dmg()),
             audio: Box::new(AudioRegisters::new(sample_rate)),
             serial: SerialPort::default(),
             sample_rate,
@@ -121,11 +122,11 @@ impl MachineBus {
                 InterruptMask::default()
             }
             0x8000..=0x9fff | 0xfe00..=0xfe9f | 0xff40..=0xff4b => {
-                self.video.write(address, value);
+                let effects = self.video.write(address, value);
                 if address == 0xff46 {
                     self.dma.start(value);
                 }
-                InterruptMask::default()
+                effects.requested_interrupts
             }
             0xc000..=0xdfff => {
                 self.wram[usize::from(address - 0xc000)] = value;
@@ -174,7 +175,7 @@ impl MachineBus {
         self.timer = Timer::default();
         self.interrupts = InterruptRegisters::default();
         self.dma = OamDma::default();
-        self.video = Box::new(VideoRegisters::default());
+        self.video = Box::new(Ppu::post_boot_dmg());
         self.audio = Box::new(AudioRegisters::new(self.sample_rate));
         self.serial = SerialPort::default();
         self.now_unix_seconds = now;
@@ -201,6 +202,11 @@ impl MachineBus {
     pub(crate) fn serial_output(&self) -> &[u8] {
         &self.serial.captured
     }
+
+    #[cfg(test)]
+    pub(crate) fn diagnostic_read(&self, address: u16) -> u8 {
+        self.read_unclocked(address)
+    }
 }
 
 impl CpuBus for MachineBus {
@@ -218,11 +224,12 @@ impl CpuBus for MachineBus {
         let allowed =
             !self.dma.active() || (0xff80..=0xfffe).contains(&address) || address == 0xff46;
         let timer_write = allowed && (0xff04..=0xff07).contains(&address);
-        if timer_write {
+        let ppu_memory_write = allowed && matches!(address, 0x8000..=0x9fff | 0xfe00..=0xfe9f);
+        if timer_write || ppu_memory_write {
             self.write_unclocked(address, value);
         }
         self.tick_m_cycle();
-        if allowed && !timer_write {
+        if allowed && !timer_write && !ppu_memory_write {
             self.write_unclocked(address, value);
         }
     }

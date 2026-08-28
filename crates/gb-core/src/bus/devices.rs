@@ -8,9 +8,17 @@ pub(crate) struct TickEffects {
     pub(crate) requested_interrupts: InterruptMask,
 }
 
+impl TickEffects {
+    pub(crate) const fn union(self, other: Self) -> Self {
+        Self {
+            requested_interrupts: self.requested_interrupts.union(other.requested_interrupts),
+        }
+    }
+}
+
 pub(crate) trait VideoDevice: Send {
     fn read(&self, address: u16) -> u8;
-    fn write(&mut self, address: u16, value: u8);
+    fn write(&mut self, address: u16, value: u8) -> TickEffects;
     fn dma_write_oam(&mut self, index: u8, value: u8);
     fn tick(&mut self, t_cycles: u32) -> TickEffects;
     fn frame_ready(&self) -> bool;
@@ -23,58 +31,6 @@ pub(crate) trait AudioDevice: Send {
     fn tick(&mut self, t_cycles: u32) -> TickEffects;
     fn stereo_frames_available(&self) -> usize;
     fn drain_audio(&mut self) -> AudioBatch;
-}
-
-pub(crate) struct VideoRegisters {
-    vram: Box<[u8; 0x2000]>,
-    oam: Box<[u8; 0xa0]>,
-    registers: [u8; 0x0c],
-}
-
-impl Default for VideoRegisters {
-    fn default() -> Self {
-        Self {
-            vram: Box::new([0; 0x2000]),
-            oam: Box::new([0; 0xa0]),
-            registers: [0; 0x0c],
-        }
-    }
-}
-
-impl VideoDevice for VideoRegisters {
-    fn read(&self, address: u16) -> u8 {
-        match address {
-            0x8000..=0x9fff => self.vram[usize::from(address - 0x8000)],
-            0xfe00..=0xfe9f => self.oam[usize::from(address - 0xfe00)],
-            0xff44 => 0xff,
-            0xff40..=0xff4b => self.registers[usize::from(address - 0xff40)],
-            _ => 0xff,
-        }
-    }
-
-    fn write(&mut self, address: u16, value: u8) {
-        match address {
-            0x8000..=0x9fff => self.vram[usize::from(address - 0x8000)] = value,
-            0xfe00..=0xfe9f => self.oam[usize::from(address - 0xfe00)] = value,
-            0xff40..=0xff4b if address != 0xff44 => {
-                self.registers[usize::from(address - 0xff40)] = value;
-            }
-            _ => {}
-        }
-    }
-
-    fn dma_write_oam(&mut self, index: u8, value: u8) {
-        self.oam[usize::from(index)] = value;
-    }
-    fn tick(&mut self, _t_cycles: u32) -> TickEffects {
-        TickEffects::default()
-    }
-    fn frame_ready(&self) -> bool {
-        false
-    }
-    fn take_frame(&mut self) -> Option<Frame> {
-        None
-    }
 }
 
 pub(crate) struct AudioRegisters {
