@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod bus;
+mod cartridge;
 mod cpu;
 mod interrupts;
 
