@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gb_core::{Button, CartridgeMetadata, EmulatorCore, Frame, InputSourceId, JoypadState};
 
@@ -234,12 +234,30 @@ impl DesktopRuntime {
             .expect("runtime reports buffered frame count")
     }
 
+    #[cfg(test)]
+    fn test_only_fill_command_queue(&self) {
+        for _ in 0..COMMAND_QUEUE_CAPACITY {
+            let (reply, _response) = mpsc::sync_channel(1);
+            self.sender
+                .try_send(RuntimeCommand::Snapshot { reply })
+                .expect("blocked worker leaves room for the exact bounded queue");
+        }
+    }
+
     pub fn shutdown(&self) -> RuntimeResult<()> {
         let mut worker = self.worker.lock().map_err(|_| runtime_unavailable())?;
         let Some(handle) = worker.take() else {
             return Ok(());
         };
-        let response = self.request(|reply| RuntimeCommand::Shutdown { reply });
+        let (reply, response) = mpsc::sync_channel(1);
+        let response = if self.sender.send(RuntimeCommand::Shutdown { reply }).is_ok() {
+            match response.recv_timeout(RESPONSE_TIMEOUT) {
+                Ok(response) => response,
+                Err(_) => Err(runtime_unavailable()),
+            }
+        } else {
+            Err(runtime_unavailable())
+        };
         handle.join().map_err(|_| runtime_unavailable())?;
         response
     }
@@ -271,13 +289,30 @@ fn run_worker(receiver: &Receiver<RuntimeCommand>, factory: &Arc<dyn CoreFactory
     let mut core: Option<Box<dyn RuntimeCore>> = None;
     let mut observer: Option<Arc<dyn RuntimeObserver>> = None;
     let mut delivery = FrameDelivery::default();
+    let mut next_frame_deadline: Option<Instant> = None;
 
     loop {
-        let timeout = if model.snapshot.phase == RuntimePhase::Running {
-            FRAME_INTERVAL
+        let now = Instant::now();
+        if model.snapshot.phase == RuntimePhase::Running {
+            let deadline = *next_frame_deadline.get_or_insert(now + FRAME_INTERVAL);
+            if now >= deadline {
+                run_tick(
+                    &mut model,
+                    core.as_deref_mut(),
+                    &mut observer,
+                    &mut delivery,
+                );
+                next_frame_deadline = (model.snapshot.phase == RuntimePhase::Running)
+                    .then(|| advance_frame_deadline(deadline, Instant::now()));
+                continue;
+            }
         } else {
-            IDLE_POLL_INTERVAL
-        };
+            next_frame_deadline = None;
+        }
+
+        let timeout = next_frame_deadline.map_or(IDLE_POLL_INTERVAL, |deadline| {
+            deadline.saturating_duration_since(now)
+        });
         match receiver.recv_timeout(timeout) {
             Ok(command) => {
                 if handle_command(
@@ -291,18 +326,18 @@ fn run_worker(receiver: &Receiver<RuntimeCommand>, factory: &Arc<dyn CoreFactory
                     break;
                 }
             }
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                if model.snapshot.phase == RuntimePhase::Running {
-                    run_tick(
-                        &mut model,
-                        core.as_deref_mut(),
-                        &mut observer,
-                        &mut delivery,
-                    );
-                }
-            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
+    }
+}
+
+fn advance_frame_deadline(deadline: Instant, now: Instant) -> Instant {
+    let next = deadline + FRAME_INTERVAL;
+    if next > now {
+        next
+    } else {
+        now + FRAME_INTERVAL
     }
 }
 
@@ -594,7 +629,9 @@ mod tests {
     use std::num::NonZeroU32;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Condvar, Mutex, mpsc};
+    use std::thread;
+    use std::time::{Duration, Instant};
 
     use gb_core::{
         AudioBatch, BatteryState, Button, CartridgeMetadata, CompatibilityMode, CoreError,
@@ -741,6 +778,47 @@ mod tests {
                 ));
             }
             self.frames.lock().expect("frames").push(packet);
+            Ok(())
+        }
+    }
+
+    struct FrameSignalObserver {
+        frames: mpsc::SyncSender<u64>,
+    }
+
+    impl RuntimeObserver for FrameSignalObserver {
+        fn publish_control(&self, _event: RuntimeEvent) -> Result<(), RuntimeError> {
+            Ok(())
+        }
+
+        fn publish_frame(&self, packet: Vec<u8>) -> Result<(), RuntimeError> {
+            let sequence = u64::from_le_bytes(packet[0..8].try_into().expect("sequence header"));
+            self.frames.try_send(sequence).map_err(|_| {
+                RuntimeError::new(
+                    RuntimeErrorCode::RuntimeUnavailable,
+                    "frame signal unavailable",
+                )
+            })
+        }
+    }
+
+    struct BlockingControlObserver {
+        entered: mpsc::SyncSender<()>,
+        release: Arc<(Mutex<bool>, Condvar)>,
+    }
+
+    impl RuntimeObserver for BlockingControlObserver {
+        fn publish_control(&self, _event: RuntimeEvent) -> Result<(), RuntimeError> {
+            self.entered.send(()).expect("test receives worker entry");
+            let (lock, condition) = &*self.release;
+            let released = lock.lock().expect("release gate");
+            let _released = condition
+                .wait_while(released, |released| !*released)
+                .expect("release gate remains available");
+            Ok(())
+        }
+
+        fn publish_frame(&self, _packet: Vec<u8>) -> Result<(), RuntimeError> {
             Ok(())
         }
     }
@@ -924,6 +1002,49 @@ mod tests {
     }
 
     #[test]
+    fn desktop_runtime_shutdown_is_delivered_when_the_command_queue_is_full() {
+        let runtime = Arc::new(DesktopRuntime::spawn(Arc::new(
+            RecordingCoreFactory::default(),
+        )));
+        let release = Arc::new((Mutex::new(false), Condvar::new()));
+        let (entered_sender, entered_receiver) = mpsc::sync_channel(1);
+        let observer = BlockingControlObserver {
+            entered: entered_sender,
+            release: Arc::clone(&release),
+        };
+        let subscribing_runtime = Arc::clone(&runtime);
+        let subscribe = thread::spawn(move || subscribing_runtime.subscribe(Arc::new(observer)));
+        entered_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("worker enters the blocking observer");
+        runtime.test_only_fill_command_queue();
+
+        let (shutdown_sender, shutdown_receiver) = mpsc::sync_channel(1);
+        let shutting_down_runtime = Arc::clone(&runtime);
+        thread::spawn(move || {
+            let _ = shutdown_sender.send(shutting_down_runtime.shutdown());
+        });
+        assert!(
+            shutdown_receiver
+                .recv_timeout(Duration::from_millis(25))
+                .is_err()
+        );
+
+        let (lock, condition) = &*release;
+        *lock.lock().expect("release gate") = true;
+        condition.notify_one();
+
+        subscribe
+            .join()
+            .expect("subscription thread joins")
+            .expect("subscription completes");
+        shutdown_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("shutdown does not hang after queue saturation")
+            .expect("shutdown succeeds");
+    }
+
+    #[test]
     fn frame_backpressure_keeps_one_in_flight_and_the_latest_pending() {
         let path = synthetic_rom_path();
         let observer = RecordingObserver::default();
@@ -942,6 +1063,44 @@ mod tests {
         assert_eq!(observer.frame_sequences(), vec![1, 3]);
         runtime.acknowledge_frame(3).expect("ack newest frame");
         assert_eq!(runtime.test_only_buffered_frame_count(), 0);
+        runtime.shutdown().expect("shutdown");
+        fs::remove_file(path).expect("remove exact synthetic ROM");
+    }
+
+    #[test]
+    fn frame_deadline_survives_continuous_commands_and_acknowledgements() {
+        let path = synthetic_rom_path();
+        let runtime = DesktopRuntime::spawn(Arc::new(ContractMockCoreFactory));
+        let (frame_sender, frame_receiver) = mpsc::sync_channel(16);
+        runtime.open_rom(path.clone()).expect("loads");
+        runtime
+            .subscribe(Arc::new(FrameSignalObserver {
+                frames: frame_sender,
+            }))
+            .expect("subscribe");
+        runtime.start().expect("start");
+
+        let first = frame_receiver
+            .recv_timeout(Duration::from_millis(100))
+            .expect("first paced frame arrives");
+        runtime.acknowledge_frame(first).expect("ack first frame");
+        let traffic_deadline = Instant::now() + Duration::from_millis(75);
+        let mut acknowledged = vec![first];
+        while Instant::now() < traffic_deadline {
+            runtime.snapshot().expect("continuous command traffic");
+            while let Ok(sequence) = frame_receiver.try_recv() {
+                runtime
+                    .acknowledge_frame(sequence)
+                    .expect("continuous frame acknowledgement");
+                acknowledged.push(sequence);
+            }
+        }
+
+        runtime.pause().expect("pause");
+        assert!(
+            acknowledged.len() >= 4,
+            "absolute cadence must progress during traffic, received {acknowledged:?}"
+        );
         runtime.shutdown().expect("shutdown");
         fs::remove_file(path).expect("remove exact synthetic ROM");
     }

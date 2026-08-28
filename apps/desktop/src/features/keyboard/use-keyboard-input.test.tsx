@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RuntimeButton } from '@/features/emulator/runtime-types'
-import { defaultKeyboardMapping } from './keyboard-mapping'
+import { defaultKeyboardMapping, type KeyboardMapping } from './keyboard-mapping'
 import { useKeyboardInput } from './use-keyboard-input'
 
 const dispatchKey = (type: 'keydown' | 'keyup', code: string, options: { repeat?: boolean } = {}) => {
@@ -16,10 +16,11 @@ const dispatchKey = (type: 'keydown' | 'keyup', code: string, options: { repeat?
 }
 
 const renderInputHook = (
-  setKeyboardInput = vi.fn<(buttons: RuntimeButton[]) => Promise<void>>().mockResolvedValue(undefined)
+  setKeyboardInput = vi.fn<(buttons: RuntimeButton[]) => Promise<void>>().mockResolvedValue(undefined),
+  mapping: KeyboardMapping = defaultKeyboardMapping
 ) => {
   const props = {
-    mapping: defaultKeyboardMapping,
+    mapping,
     enabled: true,
     suspended: false,
     setKeyboardInput
@@ -46,6 +47,25 @@ describe('useKeyboardInput', () => {
     dispatchKey('keyup', 'KeyX')
     await waitFor(() => expect(setKeyboardInput).toHaveBeenLastCalledWith(['left']))
     dispatchKey('keyup', 'ArrowLeft')
+    await waitFor(() => expect(setKeyboardInput).toHaveBeenLastCalledWith([]))
+  })
+
+  it.each([
+    ['ArrowLeft', 'left', defaultKeyboardMapping],
+    ['Space', 'a', { ...defaultKeyboardMapping, a: 'Space' }]
+  ] as const)('prevents repeated mapped %s input without duplicating IPC', async (code, button, mapping) => {
+    const { setKeyboardInput } = renderInputHook(undefined, mapping)
+
+    const initial = dispatchKey('keydown', code)
+    await waitFor(() => expect(setKeyboardInput).toHaveBeenLastCalledWith([button]))
+    expect(initial.defaultPrevented).toBe(true)
+
+    const repeated = dispatchKey('keydown', code, { repeat: true })
+    await act(() => Promise.resolve())
+
+    expect(repeated.defaultPrevented).toBe(true)
+    expect(setKeyboardInput).toHaveBeenCalledTimes(1)
+    dispatchKey('keyup', code)
     await waitFor(() => expect(setKeyboardInput).toHaveBeenLastCalledWith([]))
   })
 

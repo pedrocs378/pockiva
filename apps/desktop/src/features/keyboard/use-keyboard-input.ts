@@ -39,11 +39,11 @@ export const useKeyboardInput = ({ mapping, enabled, suspended, setKeyboardInput
     const buttonForCode = (code: string) => runtimeButtons.find((button) => mapping[button] === code)
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!enabled || suspended || event.repeat || isEditableTarget(event.target)) return
+      if (!enabled || suspended || isEditableTarget(event.target)) return
       const button = buttonForCode(event.code)
       if (!button) return
       event.preventDefault()
-      if (pressedRef.current.has(button)) return
+      if (event.repeat || pressedRef.current.has(button)) return
       pressedRef.current.add(button)
       enqueueSnapshot()
     }
