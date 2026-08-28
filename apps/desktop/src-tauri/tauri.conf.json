@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.pedro.gameboy-emulator",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "pnpm --filter @gameboy/remote-controller build && pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "pnpm --filter @gameboy/remote-controller build && pnpm build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -28,6 +28,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "resources": {
+      "../../remote-controller/dist/": "controller"
+    }
   }
 }

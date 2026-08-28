@@ -27,6 +27,7 @@
     "clsx": "2.1.1",
     "dayjs": "1.11.23",
     "radix-ui": "1.6.7",
+    "qrcode.react": "4.2.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-hook-form": "7.86.0",
