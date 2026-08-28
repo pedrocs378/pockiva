@@ -108,7 +108,7 @@ For each issue, run its plan's focused checks plus the complete workspace checks
 **Files:**
 - PED-36 owner: `crates/gb-core/src/ppu/**`, `crates/gb-core/tests/ppu/**`, `apps/desktop/src-tauri/src/video/**`, `apps/desktop/src/features/emulator/video/**`.
 - PED-49 owner: `crates/gb-core/src/apu/**`, `crates/gb-core/tests/apu/**`, `apps/desktop/src-tauri/src/audio/**`.
-- Shared timing/bus files and `apps/desktop/src-tauri/src/emulator/runtime.rs` require coordinator-owned serial integration. PED-49 supplies the tested PCM/pacing adapter; the coordinator performs and commits the runtime hookup after PED-49's isolated implementation is stable and before PED-39 starts.
+- Shared module declarations, manifests, lockfiles, timing/bus files, and `apps/desktop/src-tauri/src/emulator/runtime.rs` require coordinator-owned serial integration. PED-49 supplies the tested PCM/pacing adapter; the coordinator performs and commits the runtime hookup after PED-49's isolated implementation is stable and before PED-39 starts.
 
 **Interfaces:**
 - Consumes: completed PED-35 machine-cycle, bus, interrupt, framebuffer, and audio contracts.
@@ -125,15 +125,23 @@ docs/superpowers/plans/2026-08-27-ped-49-apu.md
 
 The plans must name every shared timing/bus change. If both require the same file, schedule that change serially through the coordinator before parallel work resumes.
 
-- [ ] **Step 2: Re-fetch blockers and dispatch the independent modules**
+- [ ] **Step 2: Run external-gate preflight before dispatch**
+
+Verify and report the availability/hash or explicit fetch consent for PED-36's pinned Mooneye and dmg-acid2 assets, the user-provided local-only Blargg `dmg_sound` asset required by PED-49, the local Apple Silicon host, and a Windows x64 runner capable of compile/check. PED-36 closes from deterministic headless frame/hash evidence plus packet/presenter tests; PED-49 requires local audio evidence when a device is available. Native real-core window validation and manual WASAPI validation belong to PED-40, so their absence is recorded now but does not create a dependency cycle or block isolated implementation.
+
+- [ ] **Step 3: Scaffold lanes, then apply one coordinator-owned bootstrap**
+
+Create and commit only the four owned module roots (`ppu/mod.rs` and `video/mod.rs` for PED-36; `apu/mod.rs` and `audio/mod.rs` for PED-49) while none is declared, so that scaffold commit is independently buildable. Then pause both lanes. The coordinator declares private `mod ppu;` and `mod apu;` in `gb-core`, declares private desktop `mod video;` and `mod audio;`, records exact desktop-only dependencies `cpal = "=0.18.2"` with default features disabled and `ringbuf = "=0.5.1"`, and reconciles `Cargo.lock`. Commit the declarations/manifests without `Cargo.lock`, then commit only `Cargo.lock`. Both lanes resume from those three commits and never stage shared files.
+
+- [ ] **Step 4: Re-fetch blockers and dispatch the independent modules**
 
 Start PED-36 and PED-49 only after PED-35 and PED-37 are both `Done`. Move both to `In Progress`, dispatch separate owners, and retain coordinator ownership of shared core and desktop-runtime integration.
 
-- [ ] **Step 3: Integrate shared timing and runtime files serially**
+- [ ] **Step 5: Integrate shared timing and runtime files in a total order**
 
-After the isolated PED-36 and PED-49 modules are stable, pause both owners. The coordinator integrates their named shared bus/timing changes and hooks PED-49's tested audio adapter into `apps/desktop/src-tauri/src/emulator/runtime.rs`, then runs the focused core, video, audio, and desktop runtime tests. Finish this serial commit before PED-39 receives runtime ownership.
+After the isolated modules are stable, pause both owners. First integrate PED-36's video device/write-effect/frame path without changing machine-cycle granularity. Then, from that verified commit, integrate PED-49's APU/divider work and convert the machine bus to the final per-T-cycle order without reverting any video behavior. Finally hook PED-49's tested audio adapter into `apps/desktop/src-tauri/src/emulator/runtime.rs` while preserving `CoreFactory::create()` and the frozen `AudioDevice`/`AudioBatch` contracts. Run focused core, video, audio, and desktop runtime tests after each serial commit. Finish all three commits before PED-39 receives runtime ownership.
 
-- [ ] **Step 4: Verify and synchronize both lanes**
+- [ ] **Step 6: Verify and synchronize both lanes**
 
 Require graphical test ROM evidence for PED-36 and audio register/timing evidence for PED-49. Run the full workspace suite after merging both lanes, then move each through `In Review` to `Done` independently.
 
