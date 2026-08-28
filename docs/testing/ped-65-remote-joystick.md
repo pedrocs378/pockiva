@@ -46,6 +46,6 @@ The local controller page was inspected in the Codex in-app browser at these vie
 
 For both directional modes, the document dimensions matched the viewport and the controller shell, directional surface, action controls, and menu controls stayed within it. The short landscape joystick rendered at 144 x 144 pixels, matching the 9rem minimum. Selecting `Joystick` and reloading the page restored the joystick selection.
 
-## Remaining physical-device acceptance
+## Physical-device acceptance
 
-Real-phone validation remains pending. Acceptance should cover rotation between portrait and landscape, eight joystick directions, simultaneous joystick plus A/B input, safe areas, disconnect/reconnect cleanup, and preference restoration after reopening the controller.
+The user confirmed successful real-phone validation on 2026-08-28. The accepted flow covered the delivered landscape controls and configurable directional input, completing the physical-device acceptance criterion for PED-65.
