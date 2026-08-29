@@ -63,7 +63,7 @@ describe('release metadata', () => {
 
   it('validates the committed repository metadata', async () => {
     const metadata = await loadRepositoryReleaseMetadata()
-    assert.equal(validateReleaseMetadata(metadata), '0.1.1')
+    assert.equal(validateReleaseMetadata(metadata), metadata.tauri.version)
   })
 })
 
