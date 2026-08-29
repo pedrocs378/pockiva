@@ -153,12 +153,14 @@ export const validateReleaseWorkflow = async (root = repositoryRoot) => {
     ['read-only permissions', /^permissions:\n {2}contents: read\n {2}pull-requests: read$/m],
     ['pull-request concurrency', /group:\s*release-pr-\$\{\{ github\.event\.pull_request\.number \}\}/],
     ['canceling release candidate concurrency', /cancel-in-progress:\s*true/],
-    ['trusted base checkout', /ref:\s*\$\{\{ github\.event\.pull_request\.base\.sha \}\}[\s\S]*path:\s*trusted/],
+    ['trusted workflow checkout', /ref:\s*\$\{\{ github\.workflow_sha \}\}[\s\S]*path:\s*trusted/],
+    ['isolated base checkout', /ref:\s*\$\{\{ github\.event\.pull_request\.base\.sha \}\}[\s\S]*path:\s*base/],
     [
       'isolated candidate checkout',
       /ref:\s*\$\{\{ github\.event\.pull_request\.head\.sha \}\}[\s\S]*path:\s*candidate/
     ],
     ['trusted release classifier', /node trusted\/scripts\/release-candidate\.mjs/],
+    ['isolated base metadata', /--base-root "\$GITHUB_WORKSPACE\/base"/],
     ['trusted Node.js version file', /node-version-file:\s*trusted\/\.tool-versions/],
     [
       'conditional App token',

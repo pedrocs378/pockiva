@@ -37,9 +37,17 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository }}
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.workflow_sha }}
           path: trusted
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out release base as data
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
           persist-credentials: false
 
       - name: Check out release candidate as data
@@ -62,7 +70,7 @@ jobs:
         run: |
           set -euo pipefail
           decision="$(node trusted/scripts/release-candidate.mjs \
-            --base-root "$GITHUB_WORKSPACE/trusted" \
+            --base-root "$GITHUB_WORKSPACE/base" \
             --candidate-root "$GITHUB_WORKSPACE/candidate" \
             --print-json)"
 
