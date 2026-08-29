@@ -113,10 +113,12 @@ export const assertBundleHasNoSigningKey = async (directory, privateKey = '') =>
 }
 
 export const validateReleaseWorkflow = async (root = repositoryRoot) => {
-  const [workflow, releasePrWorkflow] = await Promise.all([
+  const [workflowText, releasePrWorkflowText] = await Promise.all([
     readFile(join(root, '.github/workflows/release.yml'), 'utf8'),
     readFile(join(root, '.github/workflows/release-pr.yml'), 'utf8')
   ])
+  const workflow = workflowText.replaceAll('\r\n', '\n')
+  const releasePrWorkflow = releasePrWorkflowText.replaceAll('\r\n', '\n')
   const permissionBlocks = [...releasePrWorkflow.matchAll(/^([ \t]*)permissions\s*:/gm)]
   if (
     permissionBlocks.length !== 1 ||

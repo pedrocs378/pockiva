@@ -96,6 +96,26 @@ describe('release workflow', () => {
     await assert.doesNotReject(() => validateReleaseWorkflow())
   })
 
+  it('accepts workflows checked out with Windows CRLF line endings', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pockiva-release-workflow-'))
+    try {
+      const workflowDirectory = join(root, '.github/workflows')
+      await mkdir(workflowDirectory, { recursive: true })
+      const [releaseWorkflow, releasePrWorkflow] = await Promise.all([
+        readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8'),
+        readFile(new URL('../.github/workflows/release-pr.yml', import.meta.url), 'utf8')
+      ])
+      await Promise.all([
+        writeFile(join(workflowDirectory, 'release.yml'), releaseWorkflow.replaceAll('\n', '\r\n')),
+        writeFile(join(workflowDirectory, 'release-pr.yml'), releasePrWorkflow.replaceAll('\n', '\r\n'))
+      ])
+
+      await assert.doesNotReject(() => validateReleaseWorkflow(root))
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('resumes draft releases and publishes assets through the release id', async () => {
     const workflow = await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
 
