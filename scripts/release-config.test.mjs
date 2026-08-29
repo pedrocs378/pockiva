@@ -220,9 +220,10 @@ describe('release workflow', () => {
     assert.match(workflow, /\[\[ "\$HEAD_REF" != "develop" \]\]/)
     assert.match(workflow, /\[\[ "\$HEAD_REPOSITORY" != "\$GITHUB_REPOSITORY" \]\]/)
 
+    assert.match(workflow, /ref:\s*\$\{\{ github\.workflow_sha \}\}[\s\S]*path:\s*trusted[\s\S]*fetch-depth:\s*0/)
     assert.match(
       workflow,
-      /ref:\s*\$\{\{ github\.event\.pull_request\.base\.sha \}\}[\s\S]*path:\s*trusted[\s\S]*fetch-depth:\s*0/
+      /ref:\s*\$\{\{ github\.event\.pull_request\.base\.sha \}\}[\s\S]*path:\s*base[\s\S]*persist-credentials:\s*false/
     )
     assert.match(
       workflow,
@@ -230,6 +231,7 @@ describe('release workflow', () => {
     )
     assert.match(workflow, /node-version-file:\s*trusted\/\.tool-versions/)
     assert.match(workflow, /node trusted\/scripts\/release-candidate\.mjs/)
+    assert.match(workflow, /--base-root "\$GITHUB_WORKSPACE\/base"/)
     assert.match(workflow, /repos\/\$GITHUB_REPOSITORY\/releases\/tags\/\$tag/)
     assert.match(workflow, /repos\/\$GITHUB_REPOSITORY\/git\/ref\/tags\/\$tag/)
 
