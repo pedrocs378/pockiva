@@ -96,6 +96,21 @@ describe('release workflow', () => {
     await assert.doesNotReject(() => validateReleaseWorkflow())
   })
 
+  it('resumes draft releases and publishes assets through the release id', async () => {
+    const workflow = await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
+
+    assert.match(workflow, /repos\/\$GITHUB_REPOSITORY\/releases\?per_page=100/)
+    assert.doesNotMatch(workflow, /repos\/\$GITHUB_REPOSITORY\/releases\/tags\/\$TAG/)
+    assert.match(workflow, /--method POST "repos\/\$GITHUB_REPOSITORY\/releases"/)
+    assert.match(workflow, /repos\/\$GITHUB_REPOSITORY\/releases\/\$RELEASE_ID\/assets\?per_page=100/)
+    assert.match(workflow, /repos\/\$GITHUB_REPOSITORY\/releases\/assets\/\$manifest_asset_id/)
+    assert.match(workflow, /--method POST "repos\/\$GITHUB_REPOSITORY\/git\/refs"/)
+    assert.match(workflow, /--method PATCH "repos\/\$GITHUB_REPOSITORY\/releases\/\$RELEASE_ID"/)
+    assert.doesNotMatch(workflow, /gh release create/)
+    assert.doesNotMatch(workflow, /gh release download/)
+    assert.doesNotMatch(workflow, /gh release edit/)
+  })
+
   it('rejects write permissions in the release pull-request gate', async () => {
     const root = await mkdtemp(join(tmpdir(), 'pockiva-release-workflow-'))
     try {
