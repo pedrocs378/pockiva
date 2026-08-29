@@ -12,10 +12,20 @@ const privateKeyMarkers = [
   'untrusted comment: minisign secret key'
 ]
 
-const parseVersion = (version, label) => {
+export const parseStableVersion = (version, label) => {
   const match = stableSemver.exec(version)
   if (!match) throw new Error(`${label} must be a stable SemVer value, received ${JSON.stringify(version)}`)
   return match.slice(1).map(Number)
+}
+
+export const compareStableVersions = (left, right) => {
+  const leftParts = parseStableVersion(left, 'Left version')
+  const rightParts = parseStableVersion(right, 'Right version')
+  for (let index = 0; index < leftParts.length; index += 1) {
+    if (leftParts[index] > rightParts[index]) return 1
+    if (leftParts[index] < rightParts[index]) return -1
+  }
+  return 0
 }
 
 const cargoWorkspaceVersion = (cargoManifest) => {
@@ -45,7 +55,7 @@ export const loadRepositoryReleaseMetadata = async (root = repositoryRoot) => {
 
 export const validateReleaseMetadata = ({ tauri, desktopPackage, cargoVersion, capabilities, viteConfig }) => {
   const version = tauri.version
-  parseVersion(version, 'tauri.conf.json version')
+  parseStableVersion(version, 'tauri.conf.json version')
 
   if (desktopPackage.version !== version || cargoVersion !== version) {
     throw new Error(
@@ -76,10 +86,7 @@ export const validateReleaseMetadata = ({ tauri, desktopPackage, cargoVersion, c
 }
 
 export const assertVersionBump = (current, previous) => {
-  const currentParts = parseVersion(current, 'Current version')
-  const previousParts = parseVersion(previous, 'Previous version')
-  const comparison = currentParts.findIndex((part, index) => part !== previousParts[index])
-  if (comparison === -1 || currentParts[comparison] < previousParts[comparison]) {
+  if (compareStableVersions(current, previous) <= 0) {
     throw new Error(`Release version ${current} must be greater than main version ${previous}`)
   }
 }
@@ -106,7 +113,18 @@ export const assertBundleHasNoSigningKey = async (directory, privateKey = '') =>
 }
 
 export const validateReleaseWorkflow = async (root = repositoryRoot) => {
-  const workflow = await readFile(join(root, '.github/workflows/release.yml'), 'utf8')
+  const [workflow, releasePrWorkflow] = await Promise.all([
+    readFile(join(root, '.github/workflows/release.yml'), 'utf8'),
+    readFile(join(root, '.github/workflows/release-pr.yml'), 'utf8')
+  ])
+  const permissionBlocks = [...releasePrWorkflow.matchAll(/^([ \t]*)permissions\s*:/gm)]
+  if (
+    permissionBlocks.length !== 1 ||
+    permissionBlocks[0][1] !== '' ||
+    !/^permissions:\n {2}contents: read\n {2}pull-requests: read$/m.test(releasePrWorkflow)
+  ) {
+    throw new Error('Release pull-request gate must define exactly one top-level read-only permissions block')
+  }
   const requirements = [
     ['closed pull request trigger', /pull_request:[\s\S]*branches:\s*\[main\][\s\S]*types:\s*\[closed\]/],
     ['merged guard', /github\.event\.pull_request\.merged\s*==\s*true/],
@@ -122,6 +140,58 @@ export const validateReleaseWorkflow = async (root = repositoryRoot) => {
   ]
   for (const [label, pattern] of requirements) {
     if (!pattern.test(workflow)) throw new Error(`Release workflow is missing ${label}`)
+  }
+
+  const releasePrRequirements = [
+    [
+      'main pull_request_target trigger',
+      /pull_request_target:[\s\S]*branches:\s*\[main\][\s\S]*types:\s*\[opened, reopened, synchronize\]/
+    ],
+    ['single release candidate check', /^\s{4}name:\s*Validate release candidate\s*$/m],
+    ['develop source guard', /\[\[ "\$HEAD_REF" != "develop" \]\]/],
+    ['same-repository source guard', /\[\[ "\$HEAD_REPOSITORY" != "\$GITHUB_REPOSITORY" \]\]/],
+    ['read-only permissions', /^permissions:\n {2}contents: read\n {2}pull-requests: read$/m],
+    ['pull-request concurrency', /group:\s*release-pr-\$\{\{ github\.event\.pull_request\.number \}\}/],
+    ['canceling release candidate concurrency', /cancel-in-progress:\s*true/],
+    ['trusted base checkout', /ref:\s*\$\{\{ github\.event\.pull_request\.base\.sha \}\}[\s\S]*path:\s*trusted/],
+    [
+      'isolated candidate checkout',
+      /ref:\s*\$\{\{ github\.event\.pull_request\.head\.sha \}\}[\s\S]*path:\s*candidate/
+    ],
+    ['trusted release classifier', /node trusted\/scripts\/release-candidate\.mjs/],
+    ['trusted Node.js version file', /node-version-file:\s*trusted\/\.tool-versions/],
+    [
+      'conditional App token',
+      /if:\s*steps\.release-decision\.outputs\.kind == 'patch-required'[\s\S]*uses:\s*actions\/create-github-app-token@[0-9a-f]{40}/
+    ],
+    ['least-privilege App token permissions', /permission-contents:\s*write[\s\S]*permission-pull-requests:\s*write/],
+    ['deterministic automation branch', /automation\/release-pr-\$\{\{ github\.event\.pull_request\.number \}\}-patch/],
+    ['trusted version bump', /node trusted\/scripts\/version-bump\.mjs patch/],
+    ['protected patch pull request', /gh pr create[\s\S]*--base develop/],
+    ['squash auto-merge', /gh pr merge[\s\S]*--auto[\s\S]*--squash/]
+  ]
+  for (const [label, pattern] of releasePrRequirements) {
+    if (!pattern.test(releasePrWorkflow)) throw new Error(`Release pull-request gate is missing ${label}`)
+  }
+  if (/^ {2}\S[^#\n]*:\s*write\s*$/m.test(releasePrWorkflow)) {
+    throw new Error('Release pull-request gate must keep read-only permissions')
+  }
+  if ((releasePrWorkflow.match(/^\s{4}runs-on:/gm)?.length ?? 0) !== 1) {
+    throw new Error('Release pull-request gate must define exactly one job')
+  }
+
+  const forbiddenReleasePrPatterns = [
+    /pnpm install/,
+    /rust-toolchain/,
+    /cargo (?:build|check|test)/,
+    /tauri-action/,
+    /gh release (?:create|edit|upload)/,
+    /TAURI_SIGNING_PRIVATE_KEY/
+  ]
+  if (forbiddenReleasePrPatterns.some((pattern) => pattern.test(releasePrWorkflow))) {
+    throw new Error(
+      'Release pull-request gate must remain top-level read-only and must not build or use updater secrets'
+    )
   }
 }
 
