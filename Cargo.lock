@@ -1085,7 +1085,7 @@ dependencies = [
 
 [[package]]
 name = "gameboy-desktop"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "cpal",
  "futures-util",
@@ -1106,14 +1106,14 @@ dependencies = [
 
 [[package]]
 name = "gb-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "sha2",
 ]
 
 [[package]]
 name = "gb-network"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "axum",
  "base64 0.22.1",
