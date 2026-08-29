@@ -28,6 +28,16 @@ Linear is the source of truth for implementation work. Keep issue statuses and d
 - A merge from `develop` to `main` is a release boundary. The release pull request must include a SemVer increase and consistent versions across the shipped Tauri, Cargo, and desktop package metadata.
 - Do not publish tags or releases manually unless the automated release workflow is unavailable and the user explicitly approves a recovery procedure.
 
+### SemVer policy
+
+- Choose one version bump per delivery into `develop`, not one per commit. A simple task owns its bump; for a complex task, the final parent pull request owns the single bump and child pull requests into the parent branch do not bump independently.
+- Use `patch` for bug fixes, documentation, CI changes, internal refactors, and small backward-compatible adjustments. Use `minor` for new backward-compatible user-facing capabilities. Use `major` for incompatible public behavior after `1.0.0`.
+- While Pockiva remains in `0.x`, incompatible behavior advances `minor`; `1.0.0` marks the first stable public contract. Compatibility and user-visible behavior, not change size alone, determine the bump.
+- Keep `apps/desktop/src-tauri/tauri.conf.json`, `apps/desktop/package.json`, `[workspace.package]` in `Cargo.toml`, and inherited local packages in `Cargo.lock` consistent by using the root `version:bump` command.
+- If a future `develop` to `main` release pull request has no explicit bump, release automation chooses `patch`; it never replaces an explicit valid `minor` or `major` bump.
+- The branch pattern `automation/release-pr-${releasePullRequestNumber}-patch` is reserved exclusively for the GitHub App fallback that repairs a missing bump on a `develop` to `main` release pull request. It is release housekeeping, not a feature branch; humans and agents must not use the `automation/` namespace for ordinary work.
+- The generated fallback pull request targets `develop`, runs the complete required CI, and uses squash auto-merge without bypassing branch protection. A valid explicit `patch`, `minor`, or `major` bump is never rewritten by this automation.
+
 ## Verification
 
 Run `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, and `cargo test --workspace --all-features` before review.
