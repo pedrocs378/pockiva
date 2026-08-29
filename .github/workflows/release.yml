@@ -56,30 +56,70 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          if release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" 2>/dev/null)"; then
-            if [[ "$(jq -r '.draft' <<< "$release_json")" != "true" ]]; then
-              echo "Release $TAG is already published." >&2
+          find_releases_by_tag() {
+            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              | jq -c --arg tag "$TAG" '[add[] | select(.tag_name == $tag)]'
+          }
+
+          require_matching_draft() {
+            local release_json="$1"
+            if ! jq -e \
+              --arg tag "$TAG" \
+              --arg merge_sha "$MERGE_SHA" \
+              '.draft == true and
+               .prerelease == false and
+               .tag_name == $tag and
+               .target_commitish == $merge_sha and
+               (.id | type == "number")' \
+              <<< "$release_json" >/dev/null
+            then
+              echo "Release $TAG is not a resumable draft for merged commit $MERGE_SHA." >&2
               exit 1
             fi
-            release_id="$(jq -r '.id' <<< "$release_json")"
-            tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha')"
-            if [[ "$tag_sha" != "$MERGE_SHA" ]]; then
-              echo "Draft $TAG points to $tag_sha instead of merged commit $MERGE_SHA." >&2
-              exit 1
-            fi
-          else
-            if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+          }
+
+          matching_releases="$(find_releases_by_tag)"
+          release_count="$(jq -er 'length' <<< "$matching_releases")"
+          if (( release_count > 1 )); then
+            echo "Multiple releases exist for $TAG; refusing ambiguous recovery." >&2
+            exit 1
+          fi
+
+          tag_error="$(mktemp)"
+          if tag_ref="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" 2>"$tag_error")"; then
+            tag_sha="$(jq -er 'select(.object.type == "commit") | .object.sha' <<< "$tag_ref")"
+            if (( release_count == 0 )); then
               echo "Tag $TAG exists without a resumable draft release." >&2
               exit 1
             fi
-            gh release create "$TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$MERGE_SHA" \
-              --title "Pockiva $VERSION" \
-              --draft \
-              --generate-notes
-            release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '.id')"
+            if [[ "$tag_sha" != "$MERGE_SHA" ]]; then
+              echo "Tag $TAG points to $tag_sha instead of merged commit $MERGE_SHA." >&2
+              exit 1
+            fi
+          elif grep -q 'HTTP 404' "$tag_error"; then
+            tag_sha=''
+          else
+            cat "$tag_error" >&2
+            echo "Unable to verify whether tag $TAG already exists." >&2
+            exit 1
           fi
+          rm "$tag_error"
+
+          if (( release_count == 0 )); then
+            release_json="$(gh api \
+              --method POST "repos/$GITHUB_REPOSITORY/releases" \
+              -f tag_name="$TAG" \
+              -f target_commitish="$MERGE_SHA" \
+              -f name="Pockiva $VERSION" \
+              -F draft=true \
+              -F prerelease=false \
+              -F generate_release_notes=true)"
+            matching_releases="$(jq -c '[.]' <<< "$release_json")"
+          fi
+
+          release_json="$(jq -c '.[0]' <<< "$matching_releases")"
+          require_matching_draft "$release_json"
+          release_id="$(jq -er '.id' <<< "$release_json")"
           echo "release-id=$release_id" >> "$GITHUB_OUTPUT"
 
   build-macos:
@@ -203,11 +243,37 @@ jobs:
       - name: Verify updater manifest and publish
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ needs.prepare.outputs.release-id }}
+          RELEASE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
           release_directory="$(mktemp -d)"
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$release_directory"
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID")"
+          if ! jq -e \
+            --arg tag "$TAG" \
+            --arg release_sha "$RELEASE_SHA" \
+            '.draft == true and
+             .prerelease == false and
+             .tag_name == $tag and
+             .target_commitish == $release_sha' \
+            <<< "$release_json" >/dev/null
+          then
+            echo "Release $RELEASE_ID no longer matches the expected unpublished $TAG draft." >&2
+            exit 1
+          fi
+
+          assets="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?per_page=100")"
+          manifest_assets="$(jq -c '[.[] | select(.name == "latest.json")]' <<< "$assets")"
+          if [[ "$(jq -er 'length' <<< "$manifest_assets")" != "1" ]]; then
+            echo "Release $TAG must contain exactly one latest.json asset." >&2
+            exit 1
+          fi
+          manifest_asset_id="$(jq -er '.[0].id' <<< "$manifest_assets")"
+          gh api \
+            -H "Accept: application/octet-stream" \
+            "repos/$GITHUB_REPOSITORY/releases/assets/$manifest_asset_id" \
+            > "$release_directory/latest.json"
           jq -e '
             .platforms
             | has("darwin-aarch64")
@@ -215,4 +281,43 @@ jobs:
               and (."darwin-aarch64".signature | length > 0)
               and (."windows-x86_64".signature | length > 0)
           ' "$release_directory/latest.json"
-          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+
+          tag_error="$(mktemp)"
+          if tag_ref="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" 2>"$tag_error")"; then
+            tag_sha="$(jq -er 'select(.object.type == "commit") | .object.sha' <<< "$tag_ref")"
+          elif grep -q 'HTTP 404' "$tag_error"; then
+            tag_ref="$(gh api \
+              --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$TAG" \
+              -f sha="$RELEASE_SHA")"
+            tag_sha="$(jq -er 'select(.object.type == "commit") | .object.sha' <<< "$tag_ref")"
+          else
+            cat "$tag_error" >&2
+            echo "Unable to verify tag $TAG before publication." >&2
+            exit 1
+          fi
+          rm "$tag_error"
+          if [[ "$tag_sha" != "$RELEASE_SHA" ]]; then
+            echo "Tag $TAG points to $tag_sha instead of release commit $RELEASE_SHA." >&2
+            exit 1
+          fi
+
+          published_release="$(gh api \
+            --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            -F draft=false \
+            -f make_latest=true)"
+          jq -e \
+            --arg tag "$TAG" \
+            --arg release_sha "$RELEASE_SHA" \
+            '.draft == false and
+             .prerelease == false and
+             .tag_name == $tag and
+             .target_commitish == $release_sha' \
+            <<< "$published_release" >/dev/null
+          published_tag_sha="$(gh api \
+            "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" \
+            --jq 'select(.object.type == "commit") | .object.sha')"
+          if [[ "$published_tag_sha" != "$RELEASE_SHA" ]]; then
+            echo "Published tag $TAG points to $published_tag_sha instead of $RELEASE_SHA." >&2
+            exit 1
+          fi

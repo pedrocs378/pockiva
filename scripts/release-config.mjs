@@ -136,10 +136,25 @@ export const validateReleaseWorkflow = async (root = repositoryRoot) => {
     ['generated release notes', /generateReleaseNotes:\s*true/],
     ['updater JSON upload', /uploadUpdaterJson:\s*true/],
     ['NSIS updater preference', /updaterJsonPreferNsis:\s*true/],
+    ['draft release listing', /repos\/\$GITHUB_REPOSITORY\/releases\?per_page=100/],
+    ['draft release creation by API', /--method POST "repos\/\$GITHUB_REPOSITORY\/releases"/],
+    ['draft asset listing by release id', /repos\/\$GITHUB_REPOSITORY\/releases\/\$RELEASE_ID\/assets\?per_page=100/],
+    ['draft asset download by id', /repos\/\$GITHUB_REPOSITORY\/releases\/assets\/\$manifest_asset_id/],
+    ['exact release tag creation', /--method POST "repos\/\$GITHUB_REPOSITORY\/git\/refs"/],
+    ['release publication by id', /--method PATCH "repos\/\$GITHUB_REPOSITORY\/releases\/\$RELEASE_ID"/],
     ['immutable action revisions', /uses:\s*[^\s]+@[0-9a-f]{40}/]
   ]
   for (const [label, pattern] of requirements) {
     if (!pattern.test(workflow)) throw new Error(`Release workflow is missing ${label}`)
+  }
+  if (/repos\/\$GITHUB_REPOSITORY\/releases\/tags\/\$TAG/.test(workflow)) {
+    throw new Error('Release workflow must resolve unpublished drafts through the release listing')
+  }
+  if (/gh release (?:download|edit)/.test(workflow)) {
+    throw new Error('Release workflow must inspect and publish unpublished drafts through their release id')
+  }
+  if (/gh release create/.test(workflow)) {
+    throw new Error('Release workflow must capture a new draft directly from the release API response')
   }
 
   const releasePrRequirements = [
